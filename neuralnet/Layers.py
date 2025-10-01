@@ -535,10 +535,10 @@ class ConvAttention(MetaLayer):
                      "trainable": trainable},
                     {"layer": Relu},
                     {"layer": Dense, "neurons": input_dim[-1], "learn_params": learn_params,
-                     "init_dict": {XavierUniform}, "trainable": trainable}]
+                     "init_dict": {"init_cls": XavierUniform}, "trainable": trainable}]
             else:  # Spatial
                 inner = [{"input_dim": (*input_dim[:-1], channels), "kernel_size": kernel_size, "out_channels": 1,
-                          "layer": Conv2D, "learn_params": learn_params, "init_dict": {XavierUniform},
+                          "layer": Conv2D, "learn_params": learn_params, "init_dict": {"init_cls": XavierUniform},
                           "trainable": trainable}]
 
         self.inner = nn_class(inner, optimizer=optimizer, loss_func=None)
@@ -655,8 +655,8 @@ class MultiConvAttentionWO(MetaLayer):
         if mode == "Channel":
             if inner is None:
                 inner = [{"layer": MultiAttentionWO, "d_need_head": d_need_head, "learn_params": learn_params,
-                          "trainable": trainable, "input_need_shape": input_need_shape, "init_dict": {XavierUniform}},
-                         {"layer": Sigmoid}]
+                          "trainable": trainable, "input_need_shape": input_need_shape,
+                          "init_dict": {"init_cls": XavierUniform}}, {"layer": Sigmoid}]
             self.agg_axis = (1, 2)
         else:
             if "pooling_func" in kwargs:
@@ -666,9 +666,9 @@ class MultiConvAttentionWO(MetaLayer):
 
             if inner is None:
                 inner = [{"layer": Conv2D, "out_channels": d_need_head, "learn_params": learn_params,
-                          "trainable": trainable, "input_need_shape": input_need_shape, "init_dict": {XavierUniform},
-                          "kernel_size": kernel_size},
-                         {"layer": Sigmoid}]
+                          "trainable": trainable, "input_need_shape": input_need_shape,
+                          "init_dict": {"init_cls": XavierUniform},
+                          "kernel_size": kernel_size}, {"layer": Sigmoid}]
             self.agg_axis = (3,)
 
         inner[0]["input_dim"] = input_dim
