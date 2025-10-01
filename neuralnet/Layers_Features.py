@@ -1,7 +1,7 @@
 import cupy as cp
 import numpy as np
 
-from neuralnet.CONSTANTS import HALF, ONE, TWO, THREE, ZERO
+from neuralnet.CONSTANTS import HALF, ONE, TWO, THREE
 
 
 class Padding:
@@ -154,23 +154,12 @@ class Pooling:
 
         grad = unpatchify(grad_input_patches, self.x_shape, *self.pooling_shape, self.stride)
 
-        # Если получилось, что ядро пуллинга не покрыло все изображение
-        pad_bottom = self.x_shape[1] - grad.shape[1]
-        pad_right = self.x_shape[2] - grad.shape[2]
-
-        if pad_bottom > 0 or pad_right > 0:
-            grad = cp.pad(
-                grad,
-                ((0, 0), (0, pad_bottom), (0, pad_right), (0, 0)),
-                mode='constant'
-            )
-
         return grad
 
 
 class BatchNorm:
     def __init__(self, input_dim=None, momentum=0.9, eps=1e-8, norm="bn", gamma=None, beta=None,
-                 run_m=None, run_v=None, norm_mode="Dense", bn_trainable=True, n_lr=0.01, prev=None, **kwargs):
+                 run_m=None, run_v=None, norm_mode="Dense", bn_trainable=True, n_lr=0.001, prev=None, **kwargs):
 
         self.prev = prev
         self.next = None
@@ -263,7 +252,7 @@ class BatchNorm:
 
 
 class LayerNorm:
-    def __init__(self, input_dim=None, eps=1e-8, trainable=True, norm="ln", n_lr=0.01, gamma=None,
+    def __init__(self, input_dim=None, eps=1e-8, trainable=True, norm="ln", n_lr=0.001, gamma=None,
                  beta=None, prev=None, *args, **kwargs):
         """
         LayerNorm универсальный для Dense и Conv2D.
@@ -389,8 +378,12 @@ def unpatchify(patches, input_shape, kH, kW, stride):
     stride: шаг
     """
     B, H, W, C = input_shape
+
     if stride == kH == kW:
         tmp = patches.transpose(0, 1, 4, 2, 5, 3)
+        # Объединяем соответствующие оси
+        B, out_H, kH, out_W, kW, C = tmp.shape
+        H, W = out_H * kH, out_W * kW
         grad_input = tmp.reshape(B, H, W, C)
     else:
         out_H = (H - kH) // stride + 1
@@ -425,6 +418,17 @@ def unpatchify(patches, input_shape, kH, kW, stride):
         cp.add.at(grad_input_flat, linear_idx, values)
 
         grad_input = grad_input_flat.reshape(B, H, W, C)
+
+    # Если получилось, что ядро пуллинга не покрыло все изображение
+    pad_bottom = input_shape[1] - grad_input.shape[1]
+    pad_right = input_shape[2] - grad_input.shape[2]
+
+    if pad_bottom > 0 or pad_right > 0:
+        grad_input = cp.pad(
+            grad_input,
+            ((0, 0), (0, pad_bottom), (0, pad_right), (0, 0)),
+            mode='constant'
+        )
     return grad_input
 
 

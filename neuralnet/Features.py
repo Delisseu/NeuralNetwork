@@ -162,36 +162,16 @@ class Softmax:
         self.after_act = None
 
     def __call__(self, pre_act, train, *args, **kwargs):
-        exp_shifted = cp.exp(pre_act - cp.max(pre_act, axis=1, keepdims=True))
-        after_act = exp_shifted / cp.sum(exp_shifted, axis=1, keepdims=True)
+        exp_shifted = cp.exp(pre_act - cp.max(pre_act, axis=-1, keepdims=True))
+        after_act = exp_shifted / cp.sum(exp_shifted, axis=-1, keepdims=True)
         if train:
             self.after_act = after_act
         return after_act
 
     def backward(self, loss_grad, *args, **kwargs):
-        return softmax_grad(loss_grad, self.after_act, *args, **kwargs)
-
-
-def softmax_grad(loss_grad, after_act, *args, **kwargs):
-    """
-    Корректное вычисление градиента через softmax.
-
-    Учитывает, что Якобиан softmax не диагональный, поэтому
-    градиент нельзя вычислить простым умножением loss_grad на softmax_grad.
-    Вместо этого используется:
-       dL/dz = softmax * (dL/dy - <dL/dy, softmax>)
-
-    Args:
-       loss_grad (cp.ndarray): градиент по выходам softmax, форма (B, C).
-       after_act (cp.ndarray): значения softmax, форма (B, C).
-
-    Returns:
-       cp.ndarray: градиент по входам softmax, форма (B, C).
-    """
-    # loss_grad, softmax_outputs: (B, C)
-    dot = cp.sum(loss_grad * after_act, axis=1, keepdims=True)  # (B, 1)
-    grad_out = after_act * (loss_grad - dot)  # (B, C)
-    return grad_out
+        dot = cp.sum(loss_grad * self.after_act, axis=-1, keepdims=True)
+        grad_out = self.after_act * (loss_grad - dot)
+        return grad_out
 
 
 class Tanh:

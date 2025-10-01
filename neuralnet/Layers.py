@@ -1,7 +1,7 @@
 import cupy as cp
 import numpy as np
 
-from neuralnet.Features import Sigmoid, Softmax, Relu, LeakyRelu, ELU, NoAct, softmax_grad
+from neuralnet.Features import Sigmoid, Softmax, Relu, LeakyRelu, ELU, NoAct
 from neuralnet.Layers_Features import Padding, PatchExtractor, Pooling, BatchNorm, Dropout, LayerNorm, _gap_backward, \
     _gmp_backward, xavier_uniform, kaiming_uniform
 
@@ -461,16 +461,12 @@ class SelfAttention(Layer):
     def backward(self, loss_grad, optimizer):
         # 1. dV и dA
         loss_grad = loss_grad.reshape(loss_grad.shape[0], *self.input_need_shape[:-1], self.d_need_head)
-        dV = self.after_act @ loss_grad
+        dV = self.act.after_act.transpose(0, 2, 1) @ loss_grad
         dA = loss_grad @ self.V.transpose(0, 2, 1)
 
         # 2. Градиент softmax
+        dScores = self.act.backward(dA)  # softmax
 
-        B, N, _ = self.after_act.shape
-        after_act_flat = self.after_act.reshape(B * N, N)
-        dA_flat = dA.reshape(B * N, N)
-        dScores_flat = softmax_grad(dA_flat, after_act_flat)  # softmax
-        dScores = dScores_flat.reshape(B, N, N)
         # 3. dQ и dK
         dQ = (dScores @ self.K) / cp.sqrt(self.d_need_head)
         dK = (dScores.transpose(0, 2, 1) @ self.Q) / cp.sqrt(self.d_need_head)
@@ -505,7 +501,6 @@ class SelfAttention(Layer):
             self.Q = Q
             self.K = K
             self.V = V
-            self.after_act = after_act
         return (after_act @ V).reshape(-1, *self.input_dim[:-1], self.d_need_head)
 
     def init_weights(self):
