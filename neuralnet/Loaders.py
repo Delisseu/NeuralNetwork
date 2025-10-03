@@ -3,8 +3,7 @@ import numpy as np
 
 
 class DataLoader:
-    def __init__(self, x, y, batch_size=512, shuffle=True):
-        assert len(x) == len(y)
+    def __init__(self, x, y=None, batch_size=512, shuffle=True):
         self.x = x
         self.y = y
         self.batch_size = batch_size
@@ -28,7 +27,9 @@ class DataLoader:
 
         next_x = cp.asarray(self.x[idx], dtype=cp.float32)
 
-        if isinstance(self.y, (list, tuple)):
+        if self.y is None:
+            next_y = None
+        elif isinstance(self.y, (list, tuple)):
             next_y = [cp.asarray(v[idx], dtype=cp.float32) for v in self.y]
         else:
             next_y = cp.asarray(self.y[idx], dtype=cp.float32)
@@ -37,7 +38,7 @@ class DataLoader:
 
 
 class AsyncCupyDataLoader:
-    def __init__(self, x, y, batch_size=512, shuffle=True, stream=None):
+    def __init__(self, x, y=None, batch_size=512, shuffle=True, stream=None):
         self.x = x
         self.y = y
         self.batch_size = batch_size
@@ -85,7 +86,9 @@ class AsyncCupyDataLoader:
         with self.stream:
             self._next_x = cp.asarray(self.x[idx], dtype=cp.float32)
 
-            if isinstance(self.y, (list, tuple)):
+            if self.y is None:
+                self._next_y = None
+            elif isinstance(self.y, (list, tuple)):
                 self._next_y = [cp.asarray(v[idx], dtype=cp.float32) for v in self.y]
             else:
                 self._next_y = cp.asarray(self.y[idx], dtype=cp.float32)

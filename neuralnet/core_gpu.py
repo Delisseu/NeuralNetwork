@@ -1,3 +1,4 @@
+from neuralnet.Loaders import AsyncCupyDataLoader
 from neuralnet.Features import *
 from neuralnet.Layers import Dense, Conv2D, MultiHead, ConvAttention
 from neuralnet.Optimizers import SGD
@@ -93,7 +94,8 @@ class NeuralNetwork:
 
         if x_test is not None:
 
-            x_test = np.asarray(x_test, dtype=cp.float32)
+            x_test = AsyncCupyDataLoader(np.asarray(x_test, dtype=cp.float32), batch_size=train_loader.batch_size,
+                                         shuffle=False, stream=train_loader.stream)
             if isinstance(early_target, list):
                 y_test = [cp.asarray(arr, dtype=cp.float32) for arr in y_test]
             else:
@@ -120,7 +122,7 @@ class NeuralNetwork:
                 self.backward(loss_grad)
             # Early stopping — после всей эпохи
             if early_stop:
-                y_val_pred = self.predict(x_test, train_loader.batch_size, numpy=False)
+                y_val_pred = self.predict(x_test, numpy=False)
 
                 # поддержка single, list
                 if isinstance(early_target, list):
@@ -155,13 +157,12 @@ class NeuralNetwork:
 
         return best_model
 
-    def predict(self, x_data, batch_size=None, numpy=True):
+    def predict(self, predictor_loader, numpy=True):
         """
         Предсказание на новых данных.
 
         Args:
-            x_data (np.ndarray): входные данные.
-            batch_size (int, optional): размер батча. Если None — всё сразу.
+            predictor_loader (AsyncCupyDataLoader): входные данные.
             numpy (bool, optional): вернуть результат как numpy-массив (True)
                 или cupy-массив (False).
 
@@ -170,47 +171,18 @@ class NeuralNetwork:
                 предсказания модели. Если используется многоголовая модель,
                 возвращается список массивов.
         """
-
-        # Подгрузка первого батча
-
-        batch_X_cpu = x_data[0:batch_size]
-        batch_X_gpu = cp.asarray(batch_X_cpu, dtype=cp.float32)
-
-        y_hat = self.forward(batch_X_gpu, train=False)
-        if batch_size is None:
-            if isinstance(y_hat, list):
-                if numpy:
-                    y_hat = [z.get() for z in y_hat]
-            else:
-                if numpy:
-                    y_hat = y_hat.get()
-            return y_hat
-
-        stream_load = self.stream_load
-
         if isinstance(self.loss_func, list):
             predictions = [[] for _ in range(len(self.loss_func))]
         else:
             predictions = []
 
-        for start in range(batch_size, len(x_data) + 1, batch_size):
-            end = start + batch_size
-            if end + batch_size > len(x_data):
-                end = len(x_data)
-
-            with stream_load:
-                batch_X_gpu_next = cp.asarray(cp.asarray(x_data[start:end]), dtype=cp.float32)
-
-            y_hat = self.forward(batch_X_gpu, train=False)
+        for xb, _ in predictor_loader:
+            y_hat = self.forward(xb, train=False)
             if isinstance(self.loss_func, list):
                 for i, z in enumerate(y_hat):
                     predictions[i].append(z)
             else:
                 predictions.append(y_hat)
-
-            stream_load.synchronize()
-            cp.cuda.Stream.null.synchronize()
-            batch_X_gpu = batch_X_gpu_next
 
         if isinstance(self.loss_func, list):
             predictions = [
