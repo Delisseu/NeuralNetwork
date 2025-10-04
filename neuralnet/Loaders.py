@@ -3,7 +3,8 @@ import numpy as np
 
 
 class DataLoader:
-    def __init__(self, x, y=None, batch_size=512, shuffle=True):
+    def __init__(self, x, y, batch_size=512, shuffle=True):
+        assert len(x) == len(y)
         self.x = x
         self.y = y
         self.batch_size = batch_size
@@ -27,9 +28,7 @@ class DataLoader:
 
         next_x = cp.asarray(self.x[idx], dtype=cp.float32)
 
-        if self.y is None:
-            next_y = None
-        elif isinstance(self.y, (list, tuple)):
+        if isinstance(self.y, (list, tuple)):
             next_y = [cp.asarray(v[idx], dtype=cp.float32) for v in self.y]
         else:
             next_y = cp.asarray(self.y[idx], dtype=cp.float32)

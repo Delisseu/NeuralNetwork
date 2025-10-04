@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from neuralnet.Features import CCELogits, Relu
 from neuralnet.Layers import Conv2D, Dense
+from neuralnet.Layers_Features import Pooling
 from neuralnet.Loaders import AsyncCupyDataLoader
 from neuralnet.Optimizers import Adam
 # моя модель
@@ -104,13 +105,11 @@ w4 = torch_model.fc2.weight.detach().cpu().numpy().T
 b4 = torch_model.fc2.bias.detach().cpu().numpy()
 
 configs = [
-    {"input_dim": (28, 28, 1), "out_channels": 8, "layer": Conv2D, "act": Relu, "pooling_func": "max", "lr": 0.001,
-     "kernel_size": (3, 3), "padding": "full", "stride": 1, "pooling_shape": (2, 2), "pooling_stride": 2, "w": w1,
-     "bias": b1},
-    {"out_channels": 16, "layer": Conv2D, "act": Relu, "pooling_func": "max", "lr": 0.001,
-     "kernel_size": (3, 3), "padding": "full", "stride": 1, "pooling_shape": (2, 2), "pooling_stride": 2, "w": w2,
-     "bias": b2},
-    {"neurons": 128, "layer": Dense, "act": Relu, "lr": 0.001, "w": w3, "bias": b3},
+    {"input_dim": (28, 28, 1), "out_channels": 8, "layer": Conv2D, "lr": 0.001,
+     "kernel_size": (3, 3), "w": w1, "bias": b1}, {"layer": Relu}, {"layer": Pooling},
+    {"out_channels": 16, "layer": Conv2D, "lr": 0.001,
+     "kernel_size": (3, 3), "w": w2, "bias": b2}, {"layer": Relu}, {"layer": Pooling},
+    {"neurons": 128, "layer": Dense, "lr": 0.001, "w": w3, "bias": b3}, {"layer": Relu},
     {"neurons": 10, "layer": Dense, "lr": 0.001, "w": w4, "bias": b4}
 ]
 
@@ -139,7 +138,6 @@ used_mem_net = check_vram()
 
 print(f"Использовано Torch vram: {used_mem_net - used_mem:.2f} GB")
 t_torch = time.perf_counter() - t0
-
 
 # ---------- График ----------
 plt.plot(losses_mine, label="CuPy NN")

@@ -1,6 +1,6 @@
 from neuralnet.Loaders import AsyncCupyDataLoader
 from neuralnet.Features import *
-from neuralnet.Layers import Dense, Conv2D, MultiHead, ConvAttention
+from neuralnet.Layers import Dense, Conv2D, MultiHead, ConvAttention, MultiConvAttentionWO
 from neuralnet.Optimizers import SGD
 
 
@@ -41,7 +41,7 @@ class NeuralNetwork:
                         raise ValueError(
                             "Если после Dense следует Conv2d, то Conv2d нужно передать нужную форму тензора")
 
-            if layer_cls in [MultiHead, ConvAttention]:
+            if layer_cls in [MultiHead, ConvAttention, MultiConvAttentionWO]:
                 config["nn_class"] = NeuralNetwork
                 config["optimizer"] = self.optimizer
 

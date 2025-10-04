@@ -86,103 +86,119 @@ def elastic_grad(W, lamda_1, lamda_2, *args, **kwargs):
     return l2_regularization_grad(W, lamda_1) + l1_regularization_grad(W, lamda_2)
 
 
-def l2_regularization_grad(W, lmda, *args, **kwargs):
-    return lmda * TWO * W
+def l2_regularization_grad(W, lamda, *args, **kwargs):
+    return lamda * TWO * W
 
 
-def l1_regularization_grad(W, lmda, *args, **kwargs):
-    return lmda * cp.sign(W)
-
-
-class NoAct:
-    @staticmethod
-    def __call__(pre_act, *args, **kwargs):
-        return pre_act
-
-    @staticmethod
-    def backward(loss_grad, *args, **kwargs):
-        return loss_grad
+def l1_regularization_grad(W, lamda, *args, **kwargs):
+    return lamda * cp.sign(W)
 
 
 class Sigmoid:
-    def __init__(self):
+    def __init__(self, input_dim=None, *args, **kwargs):
+        self.input_dim = input_dim
         self.after_act = None
 
-    def __call__(self, pre_act, train, *args, **kwargs):
+    def forward(self, pre_act, train=False):
         after_act = ONE / (ONE + cp.exp(-pre_act))
         if train:
             self.after_act = after_act
         return after_act
 
-    def backward(self, loss_grad, *args, **kwargs):
+    def backward(self, loss_grad, optimizer=None):
         return loss_grad * self.after_act * (ONE - self.after_act)
+
+    def export(self):
+        return {"layer": Sigmoid, "input_dim": self.input_dim}
 
 
 class Relu:
-    def __init__(self):
+    def __init__(self, input_dim=None, *args, **kwargs):
+        self.input_dim = input_dim
         self.pre_act = None
 
-    def __call__(self, pre_act, train, *args, **kwargs):
+    def forward(self, pre_act, train=False):
         if train:
             self.pre_act = pre_act
         return cp.maximum(ZERO, pre_act)
 
-    def backward(self, loss_grad, *args, **kwargs):
+    def backward(self, loss_grad, optimizer=None):
         return loss_grad * cp.where(self.pre_act > ZERO, ONE, ZERO)
+
+    def export(self):
+        return {"layer": Relu, "input_dim": self.input_dim}
 
 
 class LeakyRelu:
-    def __init__(self):
+    def __init__(self, alpha=0.01, input_dim=None, *args, **kwargs):
+        self.input_dim = input_dim
         self.pre_act = None
+        self.alpha = alpha
 
-    def __call__(self, pre_act, alpha, train, *args, **kwargs):
+    def forward(self, pre_act, train=False):
         if train:
             self.pre_act = pre_act
-        return cp.where(pre_act > ZERO, pre_act, alpha * pre_act)
+        return cp.where(pre_act > ZERO, pre_act, self.alpha * pre_act)
 
-    def backward(self, loss_grad, alpha, *args, **kwargs):
-        return loss_grad * cp.where(self.pre_act > ZERO, ONE, alpha)
+    def backward(self, loss_grad, optimizer=None):
+        return loss_grad * cp.where(self.pre_act > ZERO, ONE, self.alpha)
+
+    def export(self):
+        return {"layer": LeakyRelu, "alpha": self.alpha, "input_dim": self.input_dim}
 
 
 class ELU:
-    def __init__(self):
+    def __init__(self, alpha=0.01, input_dim=None, *args, **kwargs):
+        self.input_dim = input_dim
         self.pre_act = None
+        self.alpha = alpha
 
-    def __call__(self, pre_act, alpha, train, *args, **kwargs):
+    def forward(self, pre_act, train=False):
         if train:
             self.pre_act = pre_act
-        return cp.where(pre_act > ZERO, pre_act, alpha * (cp.exp(pre_act) - ONE))
+        return cp.where(pre_act > ZERO, pre_act, self.alpha * (cp.exp(pre_act) - ONE))
 
-    def backward(self, loss_grad, alpha, *args, **kwargs):
-        return loss_grad * cp.where(self.pre_act > ZERO, ONE, alpha * cp.exp(self.pre_act))
+    def backward(self, loss_grad, optimizer=None):
+        return loss_grad * cp.where(self.pre_act > ZERO, ONE, self.alpha * cp.exp(self.pre_act))
+
+    def export(self):
+        return {"layer": ELU, "alpha": self.alpha, "input_dim": self.input_dim}
 
 
 class Softmax:
-    def __init__(self):
+    def __init__(self, input_dim=None, *args, **kwargs):
+        self.input_dim = input_dim
         self.after_act = None
 
-    def __call__(self, pre_act, train, *args, **kwargs):
+    def forward(self, pre_act, train=False):
         exp_shifted = cp.exp(pre_act - cp.max(pre_act, axis=-1, keepdims=True))
         after_act = exp_shifted / cp.sum(exp_shifted, axis=-1, keepdims=True)
         if train:
             self.after_act = after_act
         return after_act
 
-    def backward(self, loss_grad, *args, **kwargs):
+    def backward(self, loss_grad, optimizer=None):
         dot = cp.sum(loss_grad * self.after_act, axis=-1, keepdims=True)
         grad_out = self.after_act * (loss_grad - dot)
         return grad_out
 
+    def export(self):
+        return {"layer": Softmax, "input_dim": self.input_dim}
+
 
 class Tanh:
-    def __init__(self):
+    def __init__(self, input_dim=None, *args, **kwargs):
+        self.input_dim = input_dim
         self.after_act = None
 
-    def __call__(self, pre_act, train, *args, **kwargs):
+    def forward(self, pre_act, train=False):
         after_act = cp.tanh(pre_act)
         if train:
             self.after_act = after_act
         return after_act
 
-    def backward(self, loss_grad, *args, **kwargs):
+    def backward(self, loss_grad, optimizer=None):
         return loss_grad * (ONE - self.after_act ** TWO)
+
+    def export(self):
+        return {"layer": Tanh, "input_dim": self.input_dim}

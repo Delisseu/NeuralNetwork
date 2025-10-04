@@ -11,12 +11,12 @@ class Padding:
         self.padding = padding
         self.pad_shape = pad_shape
 
-    def forward(self, x):
+    def forward(self, x, train=False):
         if self.pad_shape is None:
             self.pad_shape = self.compute_padding(x.shape)
         return self.apply_padding(x)
 
-    def backward(self, grad):
+    def backward(self, grad, optimizer=None):
         h, w = self.pad_shape
         top, bottom = h
         left, right = w
@@ -58,36 +58,37 @@ class Padding:
         return (pad_top, pad_bottom), (pad_left, pad_right)
 
     def export(self):
-        return {"padding": self.padding, "pad_shape": self.pad_shape, "stride": self.stride}
+        return {"padding": self.padding, "pad_shape": self.pad_shape, "stride": self.stride, "layer": Padding,
+                "kernel_size": self.kernel_size}
 
 
 class PatchExtractor:
-    def __init__(self, kernel_size, stride=1, **kwargs):
+    def __init__(self, kernel_size, stride=1, flatten=True, input_dim=None, **kwargs):
+        self.flatten = flatten
+        self.input_dim = input_dim
         self.kernel_size = kernel_size
         self.stride = stride
-        self.patches = None
         self.x_shape = None
         self.patch_shape = None
-        self.indices_per_sample = None
-        self.indices = None
 
-    def forward(self, x, train, flatten=True):
-
+    def forward(self, x, train=False):
+        self.x_shape = x.shape
         patches = extract_patches(x, *self.kernel_size, self.stride)
 
         self.patch_shape = patches.shape[1:]
         patches = patches.reshape(x.shape[0], *self.patch_shape[:2], -1)
-        if flatten:
+        if self.flatten:
             patches = patches.reshape(-1, patches.shape[-1])
 
-        if train:
-            self.x_shape = x.shape
-            self.patches = patches
         return patches
 
-    def backward(self, patches_grad):
+    def backward(self, patches_grad, optimizer=None):
         return unpatchify(patches_grad.reshape(self.x_shape[0], *self.patch_shape), self.x_shape, *self.kernel_size,
                           self.stride)
+
+    def export(self):
+        return {"layer": PatchExtractor, "stride": self.stride, "flatten": self.flatten, "input_dim": self.input_dim,
+                "kernel_size": self.kernel_size}
 
 
 class Pooling:
@@ -115,11 +116,9 @@ class Pooling:
 
     def export(self):
         return {"pooling_func": self.dict_key, "channelwise": self.channelwise, "pooling_shape": self.pooling_shape,
-                "pooling_stride": self.stride}
+                "pooling_stride": self.stride, "layer": Pooling}
 
-    def forward(self, x, train):
-        if not self.pooling_func:
-            return x
+    def forward(self, x, train=False):
         patches = extract_patches(x, *self.pooling_shape, self.stride)
         pool_result = self.pooling_func(patches, axis=self.axis, keepdims=True)  # (B, H, W, C, kH, kW)
 
@@ -137,9 +136,7 @@ class Pooling:
                     self.mask = mask / max_count
         return pool_result.reshape(pool_result.shape[:4])
 
-    def backward(self, grad_output):
-        if not self.pooling_func:
-            return grad_output
+    def backward(self, grad_output, optimizer=None):
         # Расширим до совпадения с маской
 
         grad_expanded = grad_output[..., cp.newaxis, cp.newaxis]  # (B, out_H, out_W, C, 1, 1)
@@ -158,29 +155,20 @@ class Pooling:
 
 
 class BatchNorm:
-    def __init__(self, input_dim=None, momentum=0.9, eps=1e-8, norm="bn", gamma=None, beta=None,
-                 run_m=None, run_v=None, norm_mode="Dense", bn_trainable=True, n_lr=0.001, prev=None, **kwargs):
+    def __init__(self, input_dim, momentum=0.9, eps=1e-8, gamma=None, beta=None,
+                 run_m=None, run_v=None, trainable=True, lr=0.001, prev=None, **kwargs):
 
         self.prev = prev
         self.next = None
         out_dim = input_dim[-1]
-        self.norm_mode = norm_mode
-        self.norm = norm
-        if not self.norm:
-            return
-        self.learning_rate = cp.array(n_lr, dtype=cp.float32)
-        self.trainable = bn_trainable
+        self.learning_rate = cp.array(lr, dtype=cp.float32)
+        self.trainable = trainable
         self.momentum = cp.array(momentum, dtype=cp.float32)
         self.eps = cp.array(eps, dtype=cp.float32)
 
-        if norm_mode == "Dense":
-            shape = (1, out_dim)
-            self.axis = (0,)
-        elif norm_mode == "Conv2d":
-            shape = (1, 1, 1, out_dim)
-            self.axis = (0, 1, 2)
-        else:
-            raise ValueError(f"Unknown mode: {norm_mode}")
+        shape = (1,) * len(input_dim) + (out_dim,)
+
+        self.axis = tuple(range(len(input_dim)))
 
         self.gamma = cp.ones(shape, dtype=cp.float32) if gamma is None else cp.asarray(gamma, dtype=cp.float32)
         self.beta = cp.zeros(shape, dtype=cp.float32) if beta is None else cp.asarray(beta, dtype=cp.float32)
@@ -196,9 +184,6 @@ class BatchNorm:
         self.m = cp.asarray(np.prod([(1, *input_dim)[ax] for ax in self.axis]), dtype=cp.float32)
 
     def forward(self, x, train=False):
-        if not self.norm:
-            return x
-
         if train:
             batch_mean = x.mean(axis=self.axis, keepdims=True)
             batch_var = x.var(axis=self.axis, keepdims=True)
@@ -220,9 +205,7 @@ class BatchNorm:
             out = self.gamma * x_hat + self.beta
         return out
 
-    def backward(self, grad, optimizer, *args):
-        if not self.norm:
-            return grad
+    def backward(self, grad, optimizer):
         m = self.m * grad.shape[0]
 
         # dL/dgamma и dL/dbeta
@@ -242,31 +225,25 @@ class BatchNorm:
         return out_grad
 
     def export(self):
-        if self.norm:
-            return {"momentum": self.momentum.copy(), "eps": self.eps.copy(), "norm": "bn",
-                    "gamma": self.gamma.copy(), "n_lr": self.learning_rate.copy(),
-                    "beta": self.beta.copy(), "run_m": self.running_mean.copy(), "run_v": self.running_var.copy(),
-                    "layer": BatchNorm, "norm_mode": self.norm_mode}
-        else:
-            return {"norm": False}
+        return {"momentum": self.momentum.copy(), "eps": self.eps.copy(), "trainable": self.trainable,
+                "gamma": self.gamma.copy(), "lr": self.learning_rate.copy(),
+                "beta": self.beta.copy(), "run_m": self.running_mean.copy(), "run_v": self.running_var.copy(),
+                "layer": BatchNorm}
 
 
 class LayerNorm:
-    def __init__(self, input_dim=None, eps=1e-8, trainable=True, norm="ln", n_lr=0.001, gamma=None,
+    def __init__(self, input_dim=None, eps=1e-8, trainable=True, lr=0.001, gamma=None,
                  beta=None, prev=None, *args, **kwargs):
         """
         LayerNorm универсальный для Dense и Conv2D.
-        input_dim: форма входа (B, ...) без батча неважно сколько осей)
+        input_dim: форма входа
         """
 
         self.prev = prev
         self.next = None
-        self.norm = norm
-        if not self.norm:
-            return
         self.eps = cp.asarray(eps, dtype=cp.float32)
         self.trainable = trainable
-        self.learning_rate = cp.array(n_lr, dtype=cp.float32)
+        self.learning_rate = cp.array(lr, dtype=cp.float32)
 
         shape = (1, *input_dim)
         self.axis = tuple(range(1, len(input_dim)))
@@ -282,8 +259,6 @@ class LayerNorm:
         self.z_norm = None
 
     def forward(self, x, train=False):
-        if not self.norm:
-            return x
         # Нормализуем по всем осям кроме первой (батча)
         mean = cp.mean(x, axis=self.axis, keepdims=True)
         var = cp.var(x, axis=self.axis, keepdims=True)
@@ -295,10 +270,7 @@ class LayerNorm:
         out = self.gamma * self.z_norm + self.beta
         return out
 
-    def backward(self, grad, optimizer, *args):
-        if not self.norm:
-            return grad
-
+    def backward(self, grad, optimizer):
         m = self.m
 
         dgamma = cp.sum(grad * self.z_norm, axis=0, keepdims=True)
@@ -318,22 +290,16 @@ class LayerNorm:
         return dx
 
     def export(self):
-        if self.norm:
-            return {"eps": self.eps.copy(), "norm": "ln", "gamma": self.gamma.copy(), "beta": self.beta.copy(),
-                    "layer": LayerNorm, "n_lr": self.learning_rate.copy()}
-        else:
-            return {"norm": False}
+        return {"eps": self.eps.copy(), "gamma": self.gamma.copy(), "beta": self.beta.copy(),
+                "layer": LayerNorm, "lr": self.learning_rate.copy(), "trainable": self.trainable}
 
 
 class Dropout:
-    def __init__(self, drop_rate=0, **kwargs):
+    def __init__(self, drop_rate=0.2, **kwargs):
         self.rate = cp.array(drop_rate, dtype=cp.float32)
-        self.is_drop = True if drop_rate else False
         self.mask = None
 
     def forward(self, after_act, train=False):
-        if not self.is_drop:
-            return after_act
         if train:
             # Подправляем размер, чтобы подходил для Dense и для Conv2d
             mask_shape = [after_act.shape[0]] + [1] * (after_act.ndim - 2) + [after_act.shape[-1]]
@@ -343,9 +309,7 @@ class Dropout:
             return after_act * (ONE - self.rate)
 
     def backward(self, grad):
-        if self.is_drop:
-            grad *= self.mask
-        return grad
+        return grad * self.mask
 
     def export(self):
         return {"drop_rate": self.rate.copy()}
@@ -467,11 +431,11 @@ def _gmp_backward(dpool, x, mode="Channel"):
         return dx
 
 
-def xavier_uniform(fan_in, fan_out):
+def xavier_uniform(fan_in, fan_out, *args, **kwargs):
     limit = cp.sqrt(6 / (fan_in + fan_out))
     return cp.random.uniform(-limit, limit, size=(fan_in, fan_out), dtype=cp.float32)
 
 
-def kaiming_uniform(fan_in, fan_out, a=0.0):
-    bound = cp.sqrt(6 / ((1 + a ** 2) * fan_in))
+def kaiming_uniform(fan_in, fan_out, alpha=0.0, *args, **kwargs):
+    bound = cp.sqrt(6 / ((1 + alpha ** 2) * fan_in))
     return cp.random.uniform(-bound, bound, size=(fan_in, fan_out), dtype=cp.float32)
