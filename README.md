@@ -1,3 +1,8 @@
+## О библиотеке
+
+Простая нейросетевая библиотека на CuPy для создания и обучения CNN, Dense и других моделей. Основная цель — возможность
+экспериментов с кастомными слоями и обучение.
+
 ## Сравнение с PyTorch
 
 Я протестировал простую CNN на MNIST (10 эпох).
@@ -34,7 +39,8 @@
     - В PyTorch: `(B, C, H, W)`  
       Это **не влияет на сходимость**, а при корректном `reshape` обе реализации совпадают.
 
-2. **Ускорение через flatten в conv2d:** при умножении патчей на kernels используется `flatten` → матричные умножения
+2. **Ускорение через flatten в conv2d:** при умножении патчей на kernels используется `flatten (B*H*W, kh*kW*C)` →
+   матричные умножения
    работают быстрее. Так же веса в conv2d хранятся в транспонированном виде.
 
 3. **Train vs Inference:**
@@ -51,7 +57,9 @@
    нет нужды на каждом слою прописывать `input_dim`, кроме первого.
 
 ---
+
 ## Доступно
+
 1. Слои: Conv2d, Dense, SelfAttention, ConvAttention, MultiAttentionWo, MultiHead, MultiConvAttention.
 2. Активации: Relu, Sigmoid, Softmax, LeakyRelu, ELU, Tanh.
 3. Функции потерь: MSE, MAE, CCE, CCE_Logits, BCE, BCE_Logits.
@@ -61,6 +69,7 @@
 7. Инициализации: xavier_uniform, kaiming_uniform.
 8. Загрузчики: DataLoader, AsyncCupyDataLoader.
 9. Другие возможности: Pooling, Patching, Padding, Dropout.
+
 ---
 При установке cupy и torch обязательно использовать версии совместимые с cuda.
 Например:
