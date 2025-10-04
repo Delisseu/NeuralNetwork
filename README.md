@@ -10,7 +10,7 @@
 **Результаты:**
 
 - Использовано VRAM (GPU):
-    - CuPy NN: **0.55 GB**
+    - CuPy NN: **0.61 GB**
     - PyTorch: **3.21 GB**
 - Время обучения (10 эпох):
     - CuPy NN: **15.60 s**
@@ -68,31 +68,33 @@
 6. Schedulers: InverseSqrtScheduler, InverseSqrtSchedulerMod1, InverseSqrtSchedulerMod2.
 7. Инициализации: xavier_uniform, kaiming_uniform.
 8. Загрузчики: DataLoader, AsyncCupyDataLoader.
-9. Другие возможности: Pooling, Patching, Padding, Dropout.
+9. Другие возможности: Pooling, PatchExtractor, Padding, Dropout.
 
 ---
-При установке cupy и torch обязательно использовать версии совместимые с cuda.
-Например:
 
-```bash
-pip install cupy-cuda12x
-```` 
+## Требования
 
-```bash
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-````
+- Python 3.9+  
+- При установке cupy и torch обязательно использовать версии совместимые с cuda. Например:
 
-Установить зависимости для использования библиотеки:
+    ```bash
+    pip install cupy-cuda12x
+    ```` 
+    
+    ```bash
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+    ````
 
-```bash
-pip install -r requirements.txt
-```
 
-Установить зависимости для использования библиотеки + сравнения с torch:
+- Установить зависимости для использования библиотеки:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-```bash
-pip install -r requirements-dev.txt
-```
+- Установить зависимости для использования библиотеки + сравнения с torch:
+    ```bash
+    pip install -r requirements-dev.txt
+    ```
 
-Примеры создания сетей можно посмотреть в `examples\example_nets.py`
-Пример создания и использования в `examples\compare_pytorch.py`
+Примеры создания сетей можно посмотреть в `examples/example_nets.py`
+Пример создания и использования в `examples/compare_pytorch.py`

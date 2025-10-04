@@ -597,14 +597,14 @@ class MultiConvAttentionWO(Layer):
                  input_need_shape=None, kernel_size=(1, 1), mode="Channel", inner=None, **kwargs):
         self.mode = mode
         self.prev = prev
+        self.trainable = trainable
         self.d_need_head = d_need_head
         self.input_dim = input_dim
 
         if mode == "Channel":
             if inner is None:
                 inner = [{"layer": MultiAttentionWO, "d_need_head": d_need_head, "lr": lr, "trainable": trainable,
-                          "input_need_shape": input_need_shape, "init_func": xavier_uniform},
-                         {"layer": Sigmoid}]
+                          "input_need_shape": input_need_shape, "init_func": xavier_uniform}, {"layer": Sigmoid}]
             self.agg_axis = (1, 2)
         else:
             if "pooling_func" in kwargs:
@@ -614,8 +614,8 @@ class MultiConvAttentionWO(Layer):
 
             if inner is None:
                 inner = [{"layer": Conv2D, "out_channels": d_need_head, "lr": lr, "trainable": trainable,
-                          "input_need_shape": input_need_shape, "init_func": xavier_uniform},
-                         {"layer": Sigmoid}]
+                          "input_need_shape": input_need_shape, "init_func": xavier_uniform,
+                          "kernel_size": kernel_size}, {"layer": Sigmoid}]
             self.agg_axis = (3,)
 
         inner[0]["input_dim"] = input_dim
