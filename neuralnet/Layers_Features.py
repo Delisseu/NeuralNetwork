@@ -308,7 +308,7 @@ class Dropout:
         else:
             return after_act * (ONE - self.rate)
 
-    def backward(self, grad):
+    def backward(self, grad, optimizer=None):
         return grad * self.mask
 
     def export(self):

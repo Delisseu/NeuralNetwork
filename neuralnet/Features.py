@@ -43,6 +43,38 @@ class BCE:
         return weights * (y_hat - y) / (y_hat * (1 - y_hat) * y.size)
 
 
+class BCELogits:
+    def __init__(self, pos_weight=1, neg_weight=1, eps=1e-8):
+        self.eps = cp.asarray(eps, dtype=cp.float32)
+        self.pos_weight = cp.asarray(pos_weight, dtype=cp.float32)
+        self.neg_weight = cp.asarray(neg_weight, dtype=cp.float32)
+
+    def __call__(self, logits, y):
+        """
+        Вычисляет BCE с логитами.
+        logits: выход сети без сигмоиды
+        y: целевые метки 0 или 1
+        """
+        # Используем численно стабильную формулу:
+        max_logits = cp.maximum(logits, ZERO)
+        log_exp = cp.log(ONE + cp.exp(-cp.abs(logits)))
+        loss = max_logits - logits * y + log_exp
+
+        # Применяем веса для положительных и отрицательных примеров
+        weights = self.pos_weight * y + self.neg_weight * (ONE - y)
+        return cp.mean(weights * loss)
+
+    def grad(self, logits, y):
+        """
+        Градиент по логитам.
+        grad = pos_weight*(sigmoid(logits)-y) для положительных
+        grad = neg_weight*(sigmoid(logits)-y) для отрицательных
+        """
+        sigmoid = ONE / (ONE + cp.exp(-logits))
+        weights = self.pos_weight * y + self.neg_weight * (ONE - y)
+        return weights * (sigmoid - y) / y.size
+
+
 class CCE:
     @staticmethod
     def __call__(y_hat, y, eps=cp.asarray(1e-8, dtype=cp.float32)):

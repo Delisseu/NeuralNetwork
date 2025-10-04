@@ -5,7 +5,7 @@
 **Результаты:**
 
 - Использовано VRAM (GPU):
-    - CuPy NN: **0.66 GB**
+    - CuPy NN: **0.55 GB**
     - PyTorch: **3.21 GB**
 - Время обучения (10 эпох):
     - CuPy NN: **15.60 s**
@@ -34,45 +34,56 @@
     - В PyTorch: `(B, C, H, W)`  
       Это **не влияет на сходимость**, а при корректном `reshape` обе реализации совпадают.
 
-2. **Нормализации** можно использовать и внутри слоёв, и как отдельный слой.
+2. **Ускорение через flatten в conv2d:** при умножении патчей на kernels используется `flatten` → матричные умножения
+   работают быстрее. Так же веса в conv2d хранятся в транспонированном виде.
 
-3. **Ускорение через flatten в conv2d:** при умножении патчей на kernels используется `flatten` → матричные умножения
-   работают быстрее.
-
-4. **Train vs Inference:**
+3. **Train vs Inference:**
     - `train=True` → сохраняются матрицы для backprop.
     - `train=False` → они не сохраняются (экономия VRAM).  
       ⚠️ Поэтому после `forward(train=False)` нельзя вызывать `backward`.
 
-5. **Активации и нормализации внутри слоёв:**  
-   Это сделано специально, чтобы конфигурации сетей оставались компактными.
-
-6. **MultiConvAttention:**  
+4. **MultiConvAttention:**  
    Является чисто экспериментом.
-
-7. **Schedulers:**  
+5. **Schedulers:**  
    Оптимизаторы поддерживают расписания обучения (`InverseSqrtScheduler`, модификации и др.).
-
-8. **Автоматическая инициализация:**  
+6. **Автоматическая инициализация:**  
    Основной класс `NeuralNetwork` сам подбирает корректные входные параметры для слоёв (в большинстве случаев), поэтому
-   нет нужды на каждом слою прописывать `input_dim`.
+   нет нужды на каждом слою прописывать `input_dim`, кроме первого.
 
 ---
-
+## Доступно
+1. Слои: Conv2d, Dense, SelfAttention, ConvAttention, MultiAttentionWo, MultiHead, MultiConvAttention.
+2. Активации: Relu, Sigmoid, Softmax, LeakyRelu, ELU, Tanh.
+3. Функции потерь: MSE, MAE, CCE, CCE_Logits, BCE, BCE_Logits.
+4. Оптимизаторы: Adam, SGD.
+5. Нормализаторы: BatchNorm, LayerNorm.
+6. Schedulers: InverseSqrtScheduler, InverseSqrtSchedulerMod1, InverseSqrtSchedulerMod2.
+7. Инициализации: xavier_uniform, kaiming_uniform.
+8. Загрузчики: DataLoader, AsyncCupyDataLoader.
+9. Другие возможности: Pooling, Patching, Padding, Dropout.
+---
 При установке cupy и torch обязательно использовать версии совместимые с cuda.
 Например:
+
 ```bash
 pip install cupy-cuda12x
 ```` 
+
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 ````
 
 Установить зависимости для использования библиотеки:
+
 ```bash
 pip install -r requirements.txt
 ```
+
 Установить зависимости для использования библиотеки + сравнения с torch:
+
 ```bash
 pip install -r requirements-dev.txt
 ```
+
+Примеры создания сетей можно посмотреть в `examples\example_nets.py`
+Пример создания и использования в `examples\compare_pytorch.py`
