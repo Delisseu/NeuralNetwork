@@ -128,12 +128,12 @@ class Pooling:
             self.x_shape = x.shape
             if self.dict_key not in ("GAP", "mean"):
                 # Маска для максимумов
-                mask = (patches == pool_result).astype(cp.float32)
+                self.mask = (patches == pool_result).astype(cp.float32)
                 # Считаем, сколько максимумов в каждом патче
-                max_count = mask.sum(axis=(-2, -1), keepdims=True)
+                max_count = self.mask.sum(axis=(-2, -1), keepdims=True)
                 # Делим на число максимумов, чтобы распределить градиент равномерно
-                if cp.maximum(ONE, max_count) is not ONE:
-                    self.mask = mask / max_count
+                self.mask /= max_count
+
         return pool_result.reshape(pool_result.shape[:4])
 
     def backward(self, grad_output, optimizer=None):
@@ -181,7 +181,13 @@ class BatchNorm:
         self.x_mu = None
         self.z_norm = None
 
+        self.batch_cache = {}
         self.m = cp.asarray(np.prod([(1, *input_dim)[ax] for ax in self.axis]), dtype=cp.float32)
+
+    def _get_batch_const(self, batch_size):
+        if batch_size not in self.batch_cache:
+            self.batch_cache[batch_size] = cp.asarray(batch_size, dtype=cp.float32)
+        return self.batch_cache[batch_size]
 
     def forward(self, x, train=False):
         if train:
@@ -206,7 +212,7 @@ class BatchNorm:
         return out
 
     def backward(self, grad, optimizer):
-        m = self.m * grad.shape[0]
+        m = self.m * self._get_batch_const(grad.shape[0])
 
         # dL/dgamma и dL/dbeta
         dgamma = cp.sum(grad * self.z_norm, axis=self.axis, keepdims=True)
