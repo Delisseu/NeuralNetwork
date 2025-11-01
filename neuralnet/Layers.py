@@ -280,16 +280,25 @@ class MultiAttentionWO(Layer):
         self.input_dim = input_dim
         self.d_need_head = d_need_head
 
+        if isinstance(self.input_dim, int):
+            self.input_dim = (self.input_dim,)
+
         if input_need_shape is None:
-            if len(input_dim) == 2:
-                self.input_need_shape = (*input_dim, 1)
+            if len(self.input_dim) == 1:
+                # (d_in,) → один элемент с d_in признаками
+                self.input_need_shape = (1, self.input_dim[0])
             else:
+                # например (L, d_in), (H, W, C)
+                # считаем, что последняя ось — признаки
                 self.input_need_shape = (np.prod(self.input_dim[:-1]), self.input_dim[-1])
         else:
             if isinstance(input_need_shape, int):
-                self.input_need_shape = (input_need_shape, 1)
+                self.input_need_shape = (1, input_need_shape)
             else:
-                self.input_need_shape = input_need_shape
+                self.input_need_shape = tuple(input_need_shape)
+
+        if d_need_head is None:
+            self.d_need_head = self.input_need_shape[-1]
 
         self.trainable = trainable
         self.learning_rate = cp.array(lr, dtype=cp.float32)
@@ -323,7 +332,7 @@ class MultiAttentionWO(Layer):
         return lin
 
     def init_weights(self):
-        d_model = self.input_dim[-1]
+        d_model = self.input_need_shape[-1]
 
         if self.W is None:
             self.W = xavier_uniform(d_model, self.d_need_head)
@@ -362,19 +371,26 @@ class SelfAttention(Layer):
         self.after_act = None
 
         if isinstance(self.input_dim, int):
+            # Одинарное число — это просто размерность признаков
             self.input_dim = (self.input_dim,)
 
+        # Если нужная форма не указана явно
         if input_need_shape is None:
-            if len(input_dim) == 1:
-                self.input_need_shape = (*input_dim, 1)
+            if len(self.input_dim) == 1:
+                # (d_model,) → считаем, что L=1, d_model = self.input_dim[0]
+                self.input_need_shape = (1, self.input_dim[0])
             else:
+                # например (H, W, C) или (L, d_model)
+                # сворачиваем все, кроме последней оси, в "длину последовательности"
                 self.input_need_shape = (np.prod(self.input_dim[:-1]), self.input_dim[-1])
         else:
             if isinstance(input_need_shape, int):
-                self.input_need_shape = (input_need_shape, 1)
+                # одно число — это размерность признаков, L=1
+                self.input_need_shape = (1, input_need_shape)
             else:
-                self.input_need_shape = input_need_shape
+                self.input_need_shape = tuple(input_need_shape)
 
+        # если d_need_head не указан, берём размерность признаков
         if d_need_head is None:
             self.d_need_head = self.input_need_shape[-1]
 

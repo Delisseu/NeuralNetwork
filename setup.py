@@ -7,7 +7,7 @@ setup(
     author="Delisseu",
     packages=find_packages(),
     install_requires=[
-        # "cupy-cudaxx", Нужно выбрать под свою версию CUDA
+        # "cupy-cudaXXx", Нужно выбрать под свою версию CUDA
         "numpy"
     ],
 )
