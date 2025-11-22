@@ -2,8 +2,7 @@ import cupy as cp
 import numpy as np
 
 from neuralnet.Features import Sigmoid, Softmax, Relu
-from neuralnet.Layers_Features import Padding, PatchExtractor, _gap_backward, \
-    _gmp_backward, xavier_uniform, kaiming_uniform
+from neuralnet.Layers_Features import Padding, PatchExtractor, xavier_uniform, kaiming_uniform, Aggregation
 
 
 class Layer:
@@ -26,7 +25,7 @@ class Conv2D(Layer):
                  w=None, lamda=0.01, lamda_2=0.01, bias=None, input_need_shape=None, **kwargs):
 
         self.alpha = cp.asarray(alpha, dtype=cp.float32)
-        self.init_func = kaiming_uniform
+        self.init_func = init_func
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.padding = Padding(kernel_size=kernel_size, **kwargs)
@@ -518,27 +517,27 @@ class ConvAttention(Layer):
         self.input_need_shape = input_need_shape
         self.dx = None
 
+        self.gap = Aggregation(self.agg_axis, agg_func="mean")
+        self.gmp = Aggregation(self.agg_axis, agg_func="max")
         if self.input_need_shape is None:
             self.input_need_shape = self.input_dim
 
     def forward(self, x, train=False):
         B, H, W, C = x.shape
 
-        if self.agg_mode == "GAP":
-            pooled = x.mean(axis=self.agg_axis)
-            if self.mode != "Channel":
-                pooled = pooled.reshape(*pooled.shape, 1)
-            pre_act = self.inner.forward(pooled, train=train)
+        if self.agg_mode in ("GAP", "GMP"):
+            if self.agg_mode == "GAP":
+                pooled = self.gap.forward(x, train)  # keepdims
+            else:
+                pooled = self.gmp.forward(x, train)  # keepdims
 
-        elif self.agg_mode == "GMP":
-            pooled = x.max(axis=self.agg_axis)
-            if self.mode != "Channel":
-                pooled = pooled.reshape(*pooled.shape, 1)
+            if self.mode == "Channel":
+                pooled = cp.squeeze(pooled)
             pre_act = self.inner.forward(pooled, train=train)
 
         else:  # "GAP+GMP"
-            pooled_1 = x.mean(axis=self.agg_axis)
-            pooled_2 = x.max(axis=self.agg_axis)
+            pooled_1 = self.gap.forward(x, train)  # keepdims
+            pooled_2 = self.gmp.forward(x, train)
 
             if self.mode == "Channel":
                 pooled = cp.concatenate([pooled_1, pooled_2], axis=0)
@@ -583,19 +582,16 @@ class ConvAttention(Layer):
 
         dpool = self.inner.backward(dact)
         if self.agg_mode == "GAP":
-            dx_2 = _gap_backward(dpool, self.input, self.mode)
+            dx_2 = self.gap.backward(dpool)
 
         elif self.agg_mode == "GMP":
-            dx_2 = _gmp_backward(dpool, self.input, self.mode)
+            dx_2 = self.gmp.backward(dpool)
 
         else:  # GAP + GMP
             if self.mode == "Channel":
-                dx_2 = _gap_backward(dpool[:B], self.input, self.mode) + _gmp_backward(dpool[B:], self.input,
-                                                                                       self.mode)
+                dx_2 = self.gap.backward(dpool[:B]) + self.gmp.backward(dpool[B:])
             else:
-                dx_2 = _gap_backward(dpool[:, :, :, :1], self.input, self.mode) + _gmp_backward(dpool[:, :, :, 1:2],
-                                                                                                self.input,
-                                                                                                self.mode)
+                dx_2 = self.gap.backward(dpool[:, :, :, 0]) + self.gmp.backward(dpool[:, :, :, 1])
 
         return dx + dx_2
 

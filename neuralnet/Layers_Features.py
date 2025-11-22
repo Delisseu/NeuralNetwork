@@ -92,19 +92,20 @@ class PatchExtractor:
 
 
 class Pooling:
-    def __init__(self, pooling_shape=(2, 2), pooling_func="max", channelwise=False, pooling_stride=None, **kwargs):
-        func_dict = {"max": cp.max, "mean": cp.mean, "min": cp.min, "GAP": cp.mean}
+    def __init__(self, pooling_shape=(2, 2), pooling_func="max", global_=False, channelwise=False, pooling_stride=None,
+                 **kwargs):
         self.channelwise = channelwise
+        if global_:
+            self.axis = (1, 2)
+        elif self.channelwise:
+            self.axis = (3, 4, 5)
+        else:
+            self.axis = (4, 5)
 
-        self.axis = (3, 4, 5) if self.channelwise else (4, 5)
+        self.global_ = global_
         self.dict_key = pooling_func
-
-        if pooling_func == "GAP":
-            self.axis = (1, 2, 4, 5)
-
-        self.pooling_func = func_dict.get(pooling_func, None)
+        self.agg = Aggregation(self.axis, pooling_func)
         self.pooling_shape = pooling_shape
-        self.pooling_size = cp.asarray(np.prod(pooling_shape), dtype=cp.float32)
         self.stride = pooling_stride
         if self.stride is None:
             self.stride = pooling_shape[0]
@@ -119,39 +120,63 @@ class Pooling:
                 "pooling_stride": self.stride, "layer": Pooling}
 
     def forward(self, x, train=False):
-        patches = extract_patches(x, *self.pooling_shape, self.stride)
-        pool_result = self.pooling_func(patches, axis=self.axis, keepdims=True)  # (B, H, W, C, kH, kW)
+        patches = extract_patches(x, *self.pooling_shape, self.stride) if not self.global_ else x
 
-        self.patches_shape = patches.shape
-        # Маска: где значение в патче совпадает
-        if train:
-            self.x_shape = x.shape
-            if self.dict_key not in ("GAP", "mean"):
-                # Маска для максимумов
-                self.mask = (patches == pool_result).astype(cp.float32)
-                # Считаем, сколько максимумов в каждом патче
-                max_count = self.mask.sum(axis=(-2, -1), keepdims=True)
-                # Делим на число максимумов, чтобы распределить градиент равномерно
-                self.mask /= max_count
-
+        pool_result = self.agg.forward(patches, train)  # (B, H, W, C, kH, kW)
+        self.x_shape = x.shape
         return pool_result.reshape(pool_result.shape[:4])
 
     def backward(self, grad_output, optimizer=None):
-        # Расширим до совпадения с маской
+        grad_input_patches = self.agg.backward(grad_output)
+        grad = unpatchify(grad_input_patches, self.x_shape, *self.pooling_shape, self.stride)
 
-        grad_expanded = grad_output[..., cp.newaxis, cp.newaxis]  # (B, out_H, out_W, C, 1, 1)
+        return grad
 
-        if self.dict_key in ("GAP", "mean"):
-            grad_input_patches = cp.zeros_like(self.patches_shape, dtype=cp.float32)
-            grad_input_patches += grad_expanded / self.pooling_size
+
+class Aggregation:
+    def __init__(self, axis, agg_func="max"):
+        func_dict = {"max": cp.max, "mean": cp.mean, "min": cp.min}
+        self.dict_key = agg_func
+        self.agg_func = func_dict[agg_func]
+        self.axis = axis
+        self.shape = None
+        self.mask = None
+        self.agg_size = None
+
+    def forward(self, x, train=False):
+        if self.agg_size is None:
+            self.agg_size = cp.prod(cp.asarray([x.shape[a] for a in self.axis], dtype=cp.int32))
+
+        agg_result = self.agg_func(x, axis=self.axis, keepdims=True)
+
+        if train:
+            self.shape = x.shape
+            if self.dict_key != "mean":
+                # Маска для максимумов
+                self.mask = (x == agg_result).astype(cp.float32)
+                # Считаем, сколько максимумов в каждом патче
+                max_count = self.mask.sum(axis=self.axis, keepdims=True)
+                # Делим на число максимумов, чтобы распределить градиент равномерно
+                self.mask /= max_count
+
+        return agg_result
+
+    def backward(self, grad_output, optimizer=None):
+
+        if grad_output.ndim != len(self.shape):
+            grad_expanded = restore_axes(grad_output, self.axis)  # (B, out_H, out_W, C, 1, 1)
+        else:
+            grad_expanded = grad_output
+
+        if self.dict_key == "mean":
+            grad_input_patches = cp.zeros(self.shape, dtype=cp.float32)
+            grad_input_patches += grad_expanded / self.agg_size
 
         else:
             # Градиент приходит только в позиции максимумов или минимумов
             grad_input_patches = grad_expanded * self.mask
 
-        grad = unpatchify(grad_input_patches, self.x_shape, *self.pooling_shape, self.stride)
-
-        return grad
+        return grad_input_patches
 
 
 class BatchNorm:
@@ -445,3 +470,13 @@ def xavier_uniform(fan_in, fan_out, *args, **kwargs):
 def kaiming_uniform(fan_in, fan_out, alpha=0.0, *args, **kwargs):
     bound = cp.sqrt(6 / ((1 + alpha ** 2) * fan_in))
     return cp.random.uniform(-bound, bound, size=(fan_in, fan_out), dtype=cp.float32)
+
+
+def restore_axes(x, aggregated_axes):
+    # x — grad_output
+    # aggregated_axes — оси, по которым делался pooling
+    # target_shape — форма патчей
+    res = x
+    for ax in aggregated_axes:
+        res = cp.expand_dims(res, axis=ax)
+    return res
