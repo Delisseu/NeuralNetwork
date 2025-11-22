@@ -14,7 +14,8 @@ CNN = [
     {"out_channels": 1, "layer": Conv2D, "lr": 0.0005, "kernel_size": (1, 1), "bias": False},
     {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
 
-    {'neurons': 512, "lr": 0.0005, "bias": False}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
+    {'neurons': 512, "lr": 0.0005, "bias": False, "regularization": {"l1": 0.1, "l2": 0.01, "wd": 0.001}},
+    {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 64, "bias": False}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 8, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 1, "lr": 0.0005, "init_func": xavier_uniform}, {"layer": Sigmoid}]
@@ -36,7 +37,8 @@ selfAttention = [
 
     {"layer": SelfAttention, "lr": 0.0005},
     {"layer": LayerNorm, "n_lr": 0.0005},
-    {'neurons': 128, "lr": 0.0005}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
+    {'neurons': 128, "lr": 0.0005, "regularization": {"l1": 0.1, "l2": 0.01, "wd": 0.001}},
+    {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 64, "lr": 0.0005}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 8, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 1, "lr": 0.0005, "init_func": xavier_uniform}, {"layer": Sigmoid}]
@@ -60,7 +62,8 @@ MultiSelfAttention = [
                                                       [{"layer": SelfAttention, "lr": 0.0001, "d_need_head": 4}]]},
     {"lr": 0.0001, "d_need_head": 4, "layer": MultiAttentionWO},
     {"layer": LayerNorm, "n_lr": 0.0005},
-    {'neurons': 128, "lr": 0.0005}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
+    {'neurons': 128, "lr": 0.0005, "regularization": {"l1": 0.1, "l2": 0.01, "wd": 0.001}},
+    {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 64, "lr": 0.0005}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 8, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 1, "lr": 0.0005, "init_func": xavier_uniform}, {"layer": Sigmoid}]
@@ -80,7 +83,8 @@ CBAM_CNN = [
     {"out_channels": 1, "layer": Conv2D, "lr": 0.0005, "kernel_size": (1, 1), "bias": False},
     {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
 
-    {'neurons': 512, "lr": 0.0005, "bias": False}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
+    {'neurons': 512, "lr": 0.0005, "bias": False,  "regularization": {"l1": 0.1, "l2": 0.01, "wd": 0.001}},
+    {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 64, "lr": 0.0005, "bias": False}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 8, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 1, "lr": 0.0005, "init_func": xavier_uniform}, {"layer": Sigmoid}]
@@ -109,7 +113,8 @@ MultiConvAttention = [
     {"out_channels": 1, "layer": Conv2D, "lr": 0.0005, "kernel_size": (1, 1), "bias": False},
     {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
 
-    {'neurons': 512, "lr": 0.0005, "bias": False}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
+    {'neurons': 512, "lr": 0.0005, "bias": False, "regularization": {"l1": 0.1, "l2": 0.01, "wd": 0.001}},
+    {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 64, "lr": 0.0005, "bias": False}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 8, "lr": 0.0005}, {"layer": Relu},
     {'neurons': 1, "lr": 0.0005, "init_func": xavier_uniform}, {"layer": Sigmoid}]
@@ -134,7 +139,8 @@ multi_head = [
     {"out_channels": 1, "layer": Conv2D, "lr": 0.0005, "kernel_size": (1, 1), "bias": False},
     {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
 
-    {'neurons': 512, "lr": 0.0005, "bias": False}, {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
+    {'neurons': 512, "lr": 0.0005, "bias": False,  "regularization": {"l1": 0.1, "l2": 0.01, "wd": 0.001}},
+    {"layer": BatchNorm, "lr": 0.0005}, {"layer": Relu},
 
     {"layer": MultiHead, "heads": [cls_head, reg_head]}]
 

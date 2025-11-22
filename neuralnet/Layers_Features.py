@@ -180,17 +180,23 @@ class Aggregation:
 
 
 class BatchNorm:
-    def __init__(self, input_dim, momentum=0.9, eps=1e-8, gamma=None, beta=None,
+    def __init__(self, input_dim, regularization=None, momentum=0.9, eps=1e-8, gamma=None, beta=None,
                  run_m=None, run_v=None, trainable=True, lr=0.001, prev=None, **kwargs):
+
+        if isinstance(regularization, dict):
+            self.regularization = {key: cp.asarray(value, dtype=cp.float32) for key, value in regularization.items()}
+        else:
+            self.regularization = {}
 
         self.prev = prev
         self.next = None
-        out_dim = input_dim[-1]
+
         self.learning_rate = cp.array(lr, dtype=cp.float32)
         self.trainable = trainable
         self.momentum = cp.array(momentum, dtype=cp.float32)
         self.eps = cp.array(eps, dtype=cp.float32)
 
+        out_dim = input_dim[-1]
         shape = (1,) * len(input_dim) + (out_dim,)
 
         self.axis = tuple(range(len(input_dim)))
@@ -251,24 +257,30 @@ class BatchNorm:
                                                                                                 keepdims=True)
 
         out_grad = dx_norm * self.std_inv + dvar * TWO * self.x_mu / m + dmean / m
-        optimizer.step(self.gamma, dgamma, self.trainable, self.learning_rate)
-        optimizer.step(self.beta, dbeta, self.trainable, self.learning_rate)
+
+        if self.trainable:
+            optimizer.step(self.gamma, dgamma, self.learning_rate, self.regularization)
+            optimizer.step(self.beta, dbeta, self.learning_rate, self.regularization, True)
         return out_grad
 
     def export(self):
         return {"momentum": self.momentum.copy(), "eps": self.eps.copy(), "trainable": self.trainable,
                 "gamma": self.gamma.copy(), "lr": self.learning_rate.copy(),
                 "beta": self.beta.copy(), "run_m": self.running_mean.copy(), "run_v": self.running_var.copy(),
-                "layer": BatchNorm}
+                "layer": BatchNorm, "regularization": {key: value.get() for key, value in self.regularization.items()}}
 
 
 class LayerNorm:
-    def __init__(self, input_dim=None, eps=1e-8, trainable=True, lr=0.001, gamma=None,
+    def __init__(self, regularization=None, input_dim=None, eps=1e-8, trainable=True, lr=0.001, gamma=None,
                  beta=None, prev=None, *args, **kwargs):
         """
         LayerNorm универсальный для Dense и Conv2D.
         input_dim: форма входа
         """
+        if isinstance(regularization, dict):
+            self.regularization = {key: cp.asarray(value, dtype=cp.float32) for key, value in regularization.items()}
+        else:
+            self.regularization = {}
 
         self.prev = prev
         self.next = None
@@ -315,14 +327,15 @@ class LayerNorm:
         dx = dx_norm * self.std_inv + dvar * TWO * self.x_mu / m + dmean / m
 
         if self.trainable:
-            optimizer.step(self.gamma, dgamma, self.trainable, self.learning_rate)
-            optimizer.step(self.beta, dbeta, self.trainable, self.learning_rate)
+            optimizer.step(self.gamma, dgamma, self.learning_rate, self.regularization)
+            optimizer.step(self.beta, dbeta, self.learning_rate, self.regularization, True)
 
         return dx
 
     def export(self):
         return {"eps": self.eps.copy(), "gamma": self.gamma.copy(), "beta": self.beta.copy(),
-                "layer": LayerNorm, "lr": self.learning_rate.copy(), "trainable": self.trainable}
+                "layer": LayerNorm, "lr": self.learning_rate.copy(), "trainable": self.trainable,
+                "regularization": {key: value.get() for key, value in self.regularization.items()}}
 
 
 class Dropout:

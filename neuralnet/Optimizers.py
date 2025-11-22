@@ -1,10 +1,11 @@
 import cupy as cp
 
 from neuralnet.CONSTANTS import ZERO, ONE, TWO, HALF
+from neuralnet.Features import elastic_grad
 
 
 class Optimizer:
-    def step(self, param, grad, trainable, lr):
+    def step(self, param, grad, lr, regularization, is_bias):
         raise NotImplementedError("Необходимо переопределить метод step")
 
 
@@ -21,10 +22,10 @@ class InverseSqrtScheduler:
         self.steps[key] += ONE
         step = self.steps[key]
         if step < self.warmup_steps:
-            n = self.n_init + step*(lr-self.n_init)/self.warmup_steps
+            n = self.n_init + step * (lr - self.n_init) / self.warmup_steps
         else:
             alpha = lr * cp.sqrt(self.warmup_steps)
-            n = alpha/cp.sqrt(step)
+            n = alpha / cp.sqrt(step)
 
         return n
 
@@ -66,23 +67,29 @@ class NoScheduler:
 
 
 class SGD(Optimizer):
-    def __init__(self, normalize=None, eps=1e-8, scheduler=NoScheduler()):
+    def __init__(self, normalize=None, eps=1e-8, scheduler=NoScheduler(), bias_penalty=False):
+        self.bias_penalty = bias_penalty
         self.scheduler = scheduler
         self.eps = cp.array(eps, dtype=cp.float32)
         self.normalize = normalize
 
-    def step(self, param, grad, trainable, lr):
-        if trainable:
-            key = id(param)
-            lr = self.scheduler.step_update(lr, key)
-            if self.normalize:
-                param /= (cp.sqrt(cp.mean(param ** TWO)) + self.eps)
+    def step(self, param, grad, lr, regularization, is_bias=False):
+        key = id(param)
+        lr = self.scheduler.step_update(lr, key)
+        if self.normalize:
+            param /= (cp.sqrt(cp.mean(param ** TWO)) + self.eps)
 
-            param -= lr * grad
+        l1 = regularization.get("l1", ZERO)
+        l2 = regularization.get("l2", ZERO)
+
+        if not is_bias or (is_bias and self.bias_penalty):
+            grad += elastic_grad(param, l1, l2)
+        param -= lr * grad
 
 
 class Adam(Optimizer):
-    def __init__(self, beta1=0.9, beta2=0.999, eps=1e-8, scheduler=NoScheduler(), weight_decay=0, clip_norm=None):
+    def __init__(self, beta1=0.9, beta2=0.999, eps=1e-8, scheduler=NoScheduler(), clip_norm=None, bias_penalty=False):
+        self.bias_penalty = bias_penalty
         self.scheduler = scheduler
         self.beta1 = cp.asarray(beta1, dtype=cp.float32)
         self.beta2 = cp.asarray(beta2, dtype=cp.float32)
@@ -92,12 +99,9 @@ class Adam(Optimizer):
         self.v = {}
         self.t = {}
 
-        self.weight_decay = cp.asarray(weight_decay, dtype=cp.float32)
         self.clip_norm = clip_norm
 
-    def step(self, param, grad, trainable, lr):
-        if not trainable:
-            return
+    def step(self, param, grad, lr, regularization, is_bias=False):
         key = id(param)
         lr = self.scheduler.step_update(lr, key)
 
@@ -109,9 +113,11 @@ class Adam(Optimizer):
         self.t[key] += ONE
         t = self.t[key]
 
-        # weight decay (L2)
-        if self.weight_decay != ZERO:
-            grad = grad + self.weight_decay * param
+        l1 = regularization.get("l1", ZERO)
+        l2 = regularization.get("l2", ZERO)
+        weight_decay = regularization.get("wd", ZERO)
+        if not is_bias or (is_bias and self.bias_penalty):
+            grad += elastic_grad(param, l1, l2)
 
         # gradient clipping
         if self.clip_norm is not None:
@@ -128,13 +134,15 @@ class Adam(Optimizer):
         v_hat = self.v[key] / (ONE - self.beta2 ** t)
 
         # Обновление параметров слоя
-        param -= lr * m_hat / (cp.sqrt(v_hat) + self.eps)
+        param -= lr * (m_hat / (cp.sqrt(v_hat) + self.eps))
+
+        if not is_bias or (is_bias and self.bias_penalty):
+            param -= lr * weight_decay * param
 
     def state_dict(self):
         """Возвращает сериализуемое состояние оптимизатора.
         WARNING: ключи — id(param) (int). При восстановлении в новом процессе
-        это работает только если параметры будут иметь те же id (обычно нет).
-        Лучше сохранять state на уровне слоёв (см. README).
+        это работает только если параметры будут иметь те же id.
         """
         # преобразуем cp arrays в cpu numpy для сериализации
         m_cpu = {str(k): v.get() for k, v in self.m.items()}
@@ -144,7 +152,6 @@ class Adam(Optimizer):
 
     def load_state_dict(self, state):
         """Попытка восстановить состояние. Требует маппинга id(param)->id(param) в текущем процессе.
-        (простая версия: загружает только структуры, без привязки к конкретным объектам)
         """
         # если в state хранятся cpu-ndarray, просто сохраняем в cp
         for k_str, arr in state.get("m", {}).items():
@@ -152,4 +159,4 @@ class Adam(Optimizer):
         for k_str, arr in state.get("v", {}).items():
             self.v[int(k_str)] = cp.asarray(arr, dtype=cp.float32)
         for k_str, val in state.get("t", {}).items():
-            self.t[int(k_str)] = int(val)
+            self.t[int(k_str)] = cp.asarray(val, dtype=cp.float32)

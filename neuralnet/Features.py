@@ -114,16 +114,16 @@ class CCELogits:
         return (probs - y) / y.size
 
 
-def elastic_grad(W, lamda_1, lamda_2, *args, **kwargs):
-    return l2_regularization_grad(W, lamda_1) + l1_regularization_grad(W, lamda_2)
+def elastic_grad(W, l1, l2, *args, **kwargs):
+    return l2_regularization_grad(W, l1) + l1_regularization_grad(W, l2)
 
 
-def l2_regularization_grad(W, lamda, *args, **kwargs):
-    return lamda * TWO * W
+def l2_regularization_grad(W, l2, *args, **kwargs):
+    return l2 * TWO * W
 
 
-def l1_regularization_grad(W, lamda, *args, **kwargs):
-    return lamda * cp.sign(W)
+def l1_regularization_grad(W, l1, *args, **kwargs):
+    return l1 * cp.sign(W)
 
 
 class Sigmoid:
