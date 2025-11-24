@@ -20,13 +20,13 @@ class Layer:
 
 
 class Conv2D(Layer):
-    def __init__(self, out_channels, input_dim, regularization=None, kernel_size=(3, 3), init_func=kaiming_uniform,
-                 alpha=0.0, trainable=True, lr=0.001, prev=None, w=None, bias=None, input_need_shape=None, **kwargs):
+    def __init__(self, out_channels, input_dim, kernel_size=(3, 3), init_func=kaiming_uniform, alpha=0.0,
+                 trainable=True, learn_params=None, prev=None, w=None, bias=None, input_need_shape=None, **kwargs):
 
-        if isinstance(regularization, dict):
-            self.regularization = {key: cp.asarray(value, dtype=cp.float32) for key, value in regularization.items()}
+        if isinstance(learn_params, dict):
+            self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
         else:
-            self.regularization = {}
+            self.learn_params = {"lr": cp.asarray(0.001, dtype=cp.float32)}
 
         self.alpha = cp.asarray(alpha, dtype=cp.float32)
         self.init_func = init_func
@@ -45,25 +45,9 @@ class Conv2D(Layer):
         self.patches = None
         self.prev = prev
         self.trainable = trainable
-        self.learning_rate = cp.array(lr, dtype=cp.float32)
         self.W = w
         self.bias = bias
         self.init_weights()
-
-    def export(self):
-        dicti = {"out_channels": self.out_channels, "lr": self.learning_rate,
-                 "trainable": self.trainable, "w": self.W.copy(), "input_need_shape": self.input_need_shape,
-                 "kernel_size": self.kernel_size, "layer": Conv2D, "input_dim": self.input_dim,
-                 "regularization": {key: value.get() for key, value in self.regularization.items()}}
-
-        if self.bias is not False:
-            dicti["bias"] = self.bias.copy()
-        else:
-            dicti["bias"] = False
-
-        dicti = self.padding.export() | dicti
-
-        return dicti
 
     def forward(self, x, train=False):
 
@@ -101,10 +85,10 @@ class Conv2D(Layer):
         if self.trainable:
             dW = grad_output.T @ self.patches
 
-            optimizer.step(self.W, dW, self.learning_rate, self.regularization)
+            optimizer.step(self.W, dW, self.learn_params)
             if self.bias is not False:
                 db = grad_output.sum(axis=0)
-                optimizer.step(self.bias, db, self.learning_rate, self.regularization, True)
+                optimizer.step(self.bias, db, self.learn_params, is_bias=True)
         return grad_input
 
     def init_weights(self):
@@ -123,16 +107,30 @@ class Conv2D(Layer):
 
         self.W = cp.array(self.W, dtype=cp.float32)
 
+    def export(self):
+        dicti = {"out_channels": self.out_channels, "trainable": self.trainable, "kernel_size": self.kernel_size,
+                 "input_dim": self.input_dim, "input_need_shape": self.input_need_shape, "layer": Conv2D,
+                 "learn_params": {key: value.get() for key, value in self.learn_params.items()}, "w": self.W.copy()}
+
+        if self.bias is not False:
+            dicti["bias"] = self.bias.copy()
+        else:
+            dicti["bias"] = False
+
+        dicti = self.padding.export() | dicti
+
+        return dicti
+
 
 class Dense(Layer):
 
-    def __init__(self, neurons, input_dim, regularization=None, lr=0.001, init_func=kaiming_uniform,
-                 trainable=True, alpha=0.0, w=None, bias=None, prev=None, input_need_shape=None, **kwargs):
+    def __init__(self, neurons, input_dim, learn_params=None, init_func=kaiming_uniform, trainable=True, alpha=0.0,
+                 w=None, bias=None, prev=None, input_need_shape=None, **kwargs):
 
-        if isinstance(regularization, dict):
-            self.regularization = {key: cp.asarray(value, dtype=cp.float32) for key, value in regularization.items()}
+        if isinstance(learn_params, dict):
+            self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
         else:
-            self.regularization = {}
+            self.learn_params = {"lr": cp.asarray(0.001, dtype=cp.float32)}
 
         self.alpha = cp.asarray(alpha, dtype=cp.float32)
         self.input = None
@@ -154,23 +152,9 @@ class Dense(Layer):
 
         self.count_neurons = neurons
         self.trainable = trainable
-        self.learning_rate = cp.array(lr, dtype=cp.float32)
         self.W = w
         self.bias = bias
         self.init_weights()
-
-    def backward(self, loss_grad, optimizer):
-
-        grad_input = (loss_grad @ self.W.T).reshape(loss_grad.shape[0], *self.input_dim)
-
-        if self.trainable:
-            dW = cp.dot(self.input.T, loss_grad)
-
-            optimizer.step(self.W, dW, self.learning_rate, self.regularization)
-            if self.bias is not False:
-                db = loss_grad.sum(axis=0)
-                optimizer.step(self.bias, db, self.learning_rate, self.regularization, True)
-        return grad_input
 
     def forward(self, x, train=False):
         x = x.reshape(x.shape[0], *self.input_need_shape)
@@ -183,6 +167,19 @@ class Dense(Layer):
             self.input = x
 
         return lin
+
+    def backward(self, loss_grad, optimizer):
+
+        grad_input = (loss_grad @ self.W.T).reshape(loss_grad.shape[0], *self.input_dim)
+
+        if self.trainable:
+            dW = cp.dot(self.input.T, loss_grad)
+
+            optimizer.step(self.W, dW, self.learn_params)
+            if self.bias is not False:
+                db = loss_grad.sum(axis=0)
+                optimizer.step(self.bias, db, self.learn_params, is_bias=True)
+        return grad_input
 
     def init_weights(self):
         fan_in = self.input_need_shape[0]
@@ -197,10 +194,9 @@ class Dense(Layer):
         self.W = cp.array(self.W, dtype=cp.float32)
 
     def export(self):
-        dicti = {"neurons": self.count_neurons, "lr": self.learning_rate.copy(),
-                 "trainable": self.trainable, "alpha": self.alpha.copy(), "w": self.W.copy(),
+        dicti = {"neurons": self.count_neurons, "trainable": self.trainable, "alpha": self.alpha.copy(),
                  "input_need_shape": self.input_need_shape, "layer": Dense, "input_dim": self.input_dim,
-                 "regularization": {key: value.get() for key, value in self.regularization.items()}}
+                 "learn_params": {key: value.get() for key, value in self.learn_params.items()}, "w": self.W.copy()}
 
         if self.bias is not False:
             dicti["bias"] = self.bias.copy()
@@ -211,7 +207,7 @@ class Dense(Layer):
 
 
 class MultiHead(Layer):
-    def __init__(self, input_dim, heads, nn_class, optimizer, prev, concat_axis=None, **kwargs):
+    def __init__(self, input_dim, heads, nn_class, optimizer, prev, concat_axis=False, **kwargs):
         init_heads = []
 
         self.input_dim = input_dim
@@ -225,23 +221,18 @@ class MultiHead(Layer):
         self.next = None
         self.prev = prev
 
-    def export(self):
-        dicti = {"heads": [nn.export() for nn in self.heads], "layer": MultiHead, "concat_axis": self.concat_axis,
-                 "input_dim": self.input_dim}
-        return dicti
-
     def forward(self, x, train=False):
         result = []
         for head in self.heads:
             result.append(head.forward(x, train=train))
             head.last_output_shape = result[-1].shape
-        if self.concat_axis is not None:
+        if self.concat_axis is not False:
             result = cp.concatenate(result, axis=self.concat_axis)
 
         return result
 
     def backward(self, loss_grad, optimizer=None):
-        if self.concat_axis is not None:
+        if self.concat_axis is not False:
             # Нужно "разрезать" loss_grad на части для каждой головы
             grads = []
             idx = 0
@@ -262,15 +253,21 @@ class MultiHead(Layer):
             grad_sum += head.backward(grads[i])
         return grad_sum / self.len_heads
 
+    def export(self):
+        dicti = {"heads": [nn.export() for nn in self.heads], "layer": MultiHead, "concat_axis": self.concat_axis,
+                 "input_dim": self.input_dim}
+        return dicti
+
 
 class MultiAttentionWO(Layer):
-    def __init__(self, input_dim, d_need_head, regularization=None, lr=0.001, trainable=True, w=None, prev=None,
+    def __init__(self, input_dim, d_need_head, learn_params=None, trainable=True, w=None, prev=None,
                  input_need_shape=None, bias=False, **kwargs):
 
-        if isinstance(regularization, dict):
-            self.regularization = {key: cp.asarray(value, dtype=cp.float32) for key, value in regularization.items()}
+        if isinstance(learn_params, dict):
+            self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
         else:
-            self.regularization = {}
+            self.learn_params = {"lr": cp.asarray(0.001, dtype=cp.float32)}
+
         self.input = None
         self.next = None
         self.prev = prev
@@ -298,23 +295,10 @@ class MultiAttentionWO(Layer):
             self.d_need_head = self.input_need_shape[-1]
 
         self.trainable = trainable
-        self.learning_rate = cp.array(lr, dtype=cp.float32)
 
         self.W = w
         self.bias = bias
         self.init_weights()
-
-    def backward(self, loss_grad, optimizer):
-        loss_grad = loss_grad.reshape(loss_grad.shape[0], -1, self.d_need_head)
-        next_grad = (loss_grad @ self.W.T).reshape(loss_grad.shape[0], *self.input_dim)
-
-        if self.trainable:
-            dW = cp.mean(self.input.transpose(0, 2, 1) @ loss_grad, axis=0)
-            optimizer.step(self.W, dW, self.learning_rate, self.regularization)
-            if self.bias is not False:
-                db = loss_grad.sum(axis=0)
-                optimizer.step(self.bias, db, self.learning_rate, self.regularization, True)
-        return next_grad
 
     def forward(self, x, train=False):
         x = x.reshape(x.shape[0], *self.input_need_shape)
@@ -327,6 +311,18 @@ class MultiAttentionWO(Layer):
         if train:
             self.input = x
         return lin
+
+    def backward(self, loss_grad, optimizer):
+        loss_grad = loss_grad.reshape(loss_grad.shape[0], -1, self.d_need_head)
+        next_grad = (loss_grad @ self.W.T).reshape(loss_grad.shape[0], *self.input_dim)
+
+        if self.trainable:
+            dW = cp.mean(self.input.transpose(0, 2, 1) @ loss_grad, axis=0)
+            optimizer.step(self.W, dW, self.learn_params)
+            if self.bias is not False:
+                db = loss_grad.sum(axis=0)
+                optimizer.step(self.bias, db, self.learn_params, is_bias=True)
+        return next_grad
 
     def init_weights(self):
         d_model = self.input_need_shape[-1]
@@ -341,9 +337,9 @@ class MultiAttentionWO(Layer):
         self.W = cp.asarray(self.W, dtype=cp.float32)
 
     def export(self):
-        dicti = {"lr": self.learning_rate.copy(), "trainable": self.trainable, "w": self.W.copy(),
-                 "d_need_head": self.d_need_head, "layer": MultiAttentionWO, "input_dim": self.input_dim,
-                 "regularization": {key: value.get() for key, value in self.regularization.items()}}
+        dicti = {"trainable": self.trainable, "w": self.W.copy(), "d_need_head": self.d_need_head,
+                 "layer": MultiAttentionWO, "input_dim": self.input_dim,
+                 "learn_params": {key: value.get() for key, value in self.learn_params.items()}}
 
         if self.bias is not False:
             dicti["bias"] = self.bias.copy()
@@ -354,13 +350,13 @@ class MultiAttentionWO(Layer):
 
 
 class SelfAttention(Layer):
-    def __init__(self, input_dim, regularization=None, d_need_head=None, lr=0.001, trainable=True, Wq=None, Wk=None,
+    def __init__(self, input_dim, learn_params=None, d_need_head=None, trainable=True, Wq=None, Wk=None,
                  Wv=None, prev=None, input_need_shape=None, **kwargs):
 
-        if isinstance(regularization, dict):
-            self.regularization = {key: cp.asarray(value, dtype=cp.float32) for key, value in regularization.items()}
+        if isinstance(learn_params, dict):
+            self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
         else:
-            self.regularization = {}
+            self.learn_params = {"lr": cp.asarray(0.001, dtype=cp.float32)}
 
         self.input = None
         self.next = None
@@ -398,13 +394,29 @@ class SelfAttention(Layer):
             self.d_need_head = self.input_need_shape[-1]
 
         self.trainable = trainable
-        self.learning_rate = cp.array(lr, dtype=cp.float32)
 
         self.Wq = Wq
         self.Wk = Wk
         self.Wv = Wv
 
         self.init_weights()
+
+    def forward(self, x, train=False):
+        x = x.reshape(x.shape[0], *self.input_need_shape)
+        Q = x @ self.Wq
+        K = x @ self.Wk
+        V = x @ self.Wv
+
+        # pre_act = cp.einsum('bij,bkj->bik', Q, K) / cp.sqrt(self.d_need_head)
+        pre_act = Q @ K.transpose(0, 2, 1) / cp.sqrt(self.d_need_head)
+        after_act = self.act.forward(pre_act, train=train)
+
+        if train:
+            self.input = x
+            self.Q = Q
+            self.K = K
+            self.V = V
+        return (after_act @ V).reshape(-1, *self.input_dim[:-1], self.d_need_head)
 
     def backward(self, loss_grad, optimizer):
         # 1. dV и dA
@@ -429,28 +441,11 @@ class SelfAttention(Layer):
         next_grad = dQ @ self.Wq.T + dK @ self.Wk.T + dV @ self.Wv.T
 
         if self.trainable:
-            optimizer.step(self.Wq, dWq, self.learning_rate, self.regularization)
-            optimizer.step(self.Wk, dWk, self.learning_rate, self.regularization)
-            optimizer.step(self.Wv, dWv, self.learning_rate, self.regularization)
+            optimizer.step(self.Wq, dWq, self.learn_params)
+            optimizer.step(self.Wk, dWk, self.learn_params)
+            optimizer.step(self.Wv, dWv, self.learn_params)
 
         return next_grad.reshape(-1, *self.input_dim)
-
-    def forward(self, x, train=False):
-        x = x.reshape(x.shape[0], *self.input_need_shape)
-        Q = x @ self.Wq
-        K = x @ self.Wk
-        V = x @ self.Wv
-
-        # pre_act = cp.einsum('bij,bkj->bik', Q, K) / cp.sqrt(self.d_need_head)
-        pre_act = Q @ K.transpose(0, 2, 1) / cp.sqrt(self.d_need_head)
-        after_act = self.act.forward(pre_act, train=train)
-
-        if train:
-            self.input = x
-            self.Q = Q
-            self.K = K
-            self.V = V
-        return (after_act @ V).reshape(-1, *self.input_dim[:-1], self.d_need_head)
 
     def init_weights(self):
         d_model = self.input_need_shape[-1]
@@ -467,19 +462,19 @@ class SelfAttention(Layer):
         self.Wv = cp.asarray(self.Wv, dtype=cp.float32)
 
     def export(self):
-        dicti = {"lr": self.learning_rate.copy(), "trainable": self.trainable,
-                 "input_need_shape": self.input_need_shape, "layer": SelfAttention,
+        dicti = {"trainable": self.trainable, "input_need_shape": self.input_need_shape, "layer": SelfAttention,
                  "Wq": self.Wq.copy(), "Wv": self.Wv.copy(), "Wk": self.Wk.copy(), "input_dim": self.input_dim,
-                 "regularization": {key: value.get() for key, value in self.regularization.items()}}
+                 "learn_params": {key: value.get() for key, value in self.learn_params.items()}}
 
         return dicti
 
 
 class ConvAttention(Layer):
     def __init__(self, input_dim, nn_class, optimizer, prev=None, input_need_shape=None, reduction=2, inner=None,
-                 agg_mode="GAP+GMP", lr=0.001, forward_weight=False, mode="Channel", kernel_size=(7, 7), trainable=True,
-                 **kwargs):
+                 agg_mode="GAP+GMP", learn_params=None, forward_weight=False, mode="Channel", kernel_size=(7, 7),
+                 trainable=True, **kwargs):
 
+        self.learn_params = learn_params
         self.forward_weight = forward_weight
         self.trainable = trainable
         self.mode = mode
@@ -503,13 +498,15 @@ class ConvAttention(Layer):
             if mode == "Channel":
                 hidden = max(1, channels // reduction)
                 inner = [
-                    {"layer": Dense, "input_dim": channels, "neurons": hidden, "lr": lr, "trainable": trainable},
+                    {"layer": Dense, "input_dim": channels, "neurons": hidden, "learn_params": learn_params,
+                     "trainable": trainable},
                     {"layer": Relu},
-                    {"layer": Dense, "neurons": input_dim[-1], "lr": lr, "init_func": xavier_uniform,
-                     "trainable": trainable}]
+                    {"layer": Dense, "neurons": input_dim[-1], "learn_params": learn_params,
+                     "init_func": xavier_uniform, "trainable": trainable}]
             else:  # Spatial
                 inner = [{"input_dim": (*input_dim[:-1], channels), "kernel_size": kernel_size, "out_channels": 1,
-                          "layer": Conv2D, "lr": lr, "init_func": xavier_uniform, "trainable": trainable}]
+                          "layer": Conv2D, "learn_params": learn_params, "init_func": xavier_uniform,
+                          "trainable": trainable}]
 
         self.inner = nn_class(inner, optimizer=optimizer, loss_func=None)
         self.agg_mode = agg_mode
@@ -603,16 +600,19 @@ class ConvAttention(Layer):
 
     def export(self):
         dicti = {"input_need_shape": self.input_need_shape, "layer": ConvAttention, "agg_mode": self.agg_mode,
-                 "reduction": self.reduction, "forward_weight": self.forward_weight,
+                 "reduction": self.reduction, "forward_weight": self.forward_weight, "trainable": self.trainable,
                  "inner": self.inner.export(), "mode": self.mode, "input_dim": self.input_dim,
-                 "trainable": self.trainable}
+                 "learn_params": self.learn_params}
 
         return dicti
 
 
 class MultiConvAttentionWO(Layer):
-    def __init__(self, input_dim, nn_class, optimizer, d_need_head, lr=0.001, trainable=True, prev=None,
+    def __init__(self, input_dim, nn_class, optimizer, d_need_head, learn_params=None, trainable=True, prev=None,
                  input_need_shape=None, kernel_size=(1, 1), mode="Channel", inner=None, **kwargs):
+
+        self.kernel_size = kernel_size
+        self.learn_params = learn_params
         self.mode = mode
         self.prev = prev
         self.trainable = trainable
@@ -621,8 +621,9 @@ class MultiConvAttentionWO(Layer):
 
         if mode == "Channel":
             if inner is None:
-                inner = [{"layer": MultiAttentionWO, "d_need_head": d_need_head, "lr": lr, "trainable": trainable,
-                          "input_need_shape": input_need_shape, "init_func": xavier_uniform}, {"layer": Sigmoid}]
+                inner = [{"layer": MultiAttentionWO, "d_need_head": d_need_head, "learn_params": learn_params,
+                          "trainable": trainable, "input_need_shape": input_need_shape, "init_func": xavier_uniform},
+                         {"layer": Sigmoid}]
             self.agg_axis = (1, 2)
         else:
             if "pooling_func" in kwargs:
@@ -631,9 +632,10 @@ class MultiConvAttentionWO(Layer):
                 del kwargs["out_channels"]
 
             if inner is None:
-                inner = [{"layer": Conv2D, "out_channels": d_need_head, "lr": lr, "trainable": trainable,
-                          "input_need_shape": input_need_shape, "init_func": xavier_uniform,
-                          "kernel_size": kernel_size}, {"layer": Sigmoid}]
+                inner = [{"layer": Conv2D, "out_channels": d_need_head, "learn_params": learn_params,
+                          "trainable": trainable, "input_need_shape": input_need_shape, "init_func": xavier_uniform,
+                          "kernel_size": kernel_size},
+                         {"layer": Sigmoid}]
             self.agg_axis = (3,)
 
         inner[0]["input_dim"] = input_dim
@@ -661,5 +663,6 @@ class MultiConvAttentionWO(Layer):
 
     def export(self):
         dicti = {"layer": MultiConvAttentionWO, "mode": self.mode, "d_need_head": self.d_need_head,
-                 "inner": self.inner.export(), "input_dim": self.input_dim, "trainable": self.trainable}
+                 "inner": self.inner.export(), "input_dim": self.input_dim, "trainable": self.trainable,
+                 "learn_params": self.learn_params, "kernel_size": self.kernel_size}
         return dicti

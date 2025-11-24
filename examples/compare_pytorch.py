@@ -105,12 +105,12 @@ w4 = torch_model.fc2.weight.detach().cpu().numpy().T
 b4 = torch_model.fc2.bias.detach().cpu().numpy()
 
 configs = [
-    {"input_dim": (28, 28, 1), "out_channels": 8, "layer": Conv2D, "lr": 0.001,
+    {"input_dim": (28, 28, 1), "out_channels": 8, "layer": Conv2D, "learn_params": {"lr": 0.001},
      "kernel_size": (3, 3), "w": w1, "bias": b1}, {"layer": Relu}, {"layer": Pooling},
-    {"out_channels": 16, "layer": Conv2D, "lr": 0.001,
+    {"out_channels": 16, "layer": Conv2D, "learn_params": {"lr": 0.001},
      "kernel_size": (3, 3), "w": w2, "bias": b2}, {"layer": Relu}, {"layer": Pooling},
-    {"neurons": 128, "layer": Dense, "lr": 0.001, "w": w3, "bias": b3}, {"layer": Relu},
-    {"neurons": 10, "layer": Dense, "lr": 0.001, "w": w4, "bias": b4}
+    {"neurons": 128, "layer": Dense, "learn_params": {"lr": 0.001}, "w": w3, "bias": b3}, {"layer": Relu},
+    {"neurons": 10, "layer": Dense, "learn_params": {"lr": 0.001}, "w": w4, "bias": b4}
 ]
 
 model = NeuralNetwork(configs, loss_func=CCELogits(), optimizer=Adam())

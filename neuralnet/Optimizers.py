@@ -5,7 +5,7 @@ from neuralnet.Features import elastic_grad
 
 
 class Optimizer:
-    def step(self, param, grad, lr, regularization, is_bias):
+    def step(self, param, grad, learn_params, is_bias=False):
         raise NotImplementedError("Необходимо переопределить метод step")
 
 
@@ -73,14 +73,16 @@ class SGD(Optimizer):
         self.eps = cp.array(eps, dtype=cp.float32)
         self.normalize = normalize
 
-    def step(self, param, grad, lr, regularization, is_bias=False):
+    def step(self, param, grad, learn_params, is_bias=False):
+
+        l1 = learn_params.get("l1", ZERO)
+        l2 = learn_params.get("l2", ZERO)
+        lr = learn_params["lr"]
+
         key = id(param)
         lr = self.scheduler.step_update(lr, key)
         if self.normalize:
             param /= (cp.sqrt(cp.mean(param ** TWO)) + self.eps)
-
-        l1 = regularization.get("l1", ZERO)
-        l2 = regularization.get("l2", ZERO)
 
         if not is_bias or (is_bias and self.bias_penalty):
             grad += elastic_grad(param, l1, l2)
@@ -101,7 +103,13 @@ class Adam(Optimizer):
 
         self.clip_norm = clip_norm
 
-    def step(self, param, grad, lr, regularization, is_bias=False):
+    def step(self, param, grad, learn_params, is_bias=False):
+
+        l1 = learn_params.get("l1", ZERO)
+        l2 = learn_params.get("l2", ZERO)
+        weight_decay = learn_params.get("wd", ZERO)
+        lr = learn_params["lr"]
+
         key = id(param)
         lr = self.scheduler.step_update(lr, key)
 
@@ -113,9 +121,6 @@ class Adam(Optimizer):
         self.t[key] += ONE
         t = self.t[key]
 
-        l1 = regularization.get("l1", ZERO)
-        l2 = regularization.get("l2", ZERO)
-        weight_decay = regularization.get("wd", ZERO)
         if not is_bias or (is_bias and self.bias_penalty):
             grad += elastic_grad(param, l1, l2)
 
