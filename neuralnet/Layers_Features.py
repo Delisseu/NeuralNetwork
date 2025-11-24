@@ -180,18 +180,17 @@ class Aggregation:
 
 
 class BatchNorm:
-    def __init__(self, input_dim, regularization=None, momentum=0.9, eps=1e-8, gamma=None, beta=None,
-                 run_m=None, run_v=None, trainable=True, lr=0.001, prev=None, **kwargs):
+    def __init__(self, input_dim, learn_params=None, momentum=0.9, eps=1e-8, gamma=None, beta=None,
+                 run_m=None, run_v=None, trainable=True, prev=None, **kwargs):
 
-        if isinstance(regularization, dict):
-            self.regularization = {key: cp.asarray(value, dtype=cp.float32) for key, value in regularization.items()}
+        if isinstance(learn_params, dict):
+            self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
         else:
-            self.regularization = {}
+            self.learn_params = {"lr": cp.asarray(0.001, dtype=cp.float32)}
 
         self.prev = prev
         self.next = None
 
-        self.learning_rate = cp.array(lr, dtype=cp.float32)
         self.trainable = trainable
         self.momentum = cp.array(momentum, dtype=cp.float32)
         self.eps = cp.array(eps, dtype=cp.float32)
@@ -259,34 +258,34 @@ class BatchNorm:
         out_grad = dx_norm * self.std_inv + dvar * TWO * self.x_mu / m + dmean / m
 
         if self.trainable:
-            optimizer.step(self.gamma, dgamma, self.learning_rate, self.regularization)
-            optimizer.step(self.beta, dbeta, self.learning_rate, self.regularization, True)
+            optimizer.step(self.gamma, dgamma, self.learn_params)
+            optimizer.step(self.beta, dbeta, self.learn_params, is_bias=True)
         return out_grad
 
     def export(self):
         return {"momentum": self.momentum.copy(), "eps": self.eps.copy(), "trainable": self.trainable,
-                "gamma": self.gamma.copy(), "lr": self.learning_rate.copy(),
-                "beta": self.beta.copy(), "run_m": self.running_mean.copy(), "run_v": self.running_var.copy(),
-                "layer": BatchNorm, "regularization": {key: value.get() for key, value in self.regularization.items()}}
+                "gamma": self.gamma.copy(), "beta": self.beta.copy(), "run_m": self.running_mean.copy(),
+                "run_v": self.running_var.copy(),
+                "layer": BatchNorm, "learn_params": {key: value.get() for key, value in self.learn_params.items()}}
 
 
 class LayerNorm:
-    def __init__(self, regularization=None, input_dim=None, eps=1e-8, trainable=True, lr=0.001, gamma=None,
+    def __init__(self, learn_params=None, input_dim=None, eps=1e-8, trainable=True, gamma=None,
                  beta=None, prev=None, *args, **kwargs):
         """
         LayerNorm универсальный для Dense и Conv2D.
         input_dim: форма входа
         """
-        if isinstance(regularization, dict):
-            self.regularization = {key: cp.asarray(value, dtype=cp.float32) for key, value in regularization.items()}
+
+        if isinstance(learn_params, dict):
+            self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
         else:
-            self.regularization = {}
+            self.learn_params = {"lr": cp.asarray(0.001, dtype=cp.float32)}
 
         self.prev = prev
         self.next = None
         self.eps = cp.asarray(eps, dtype=cp.float32)
         self.trainable = trainable
-        self.learning_rate = cp.array(lr, dtype=cp.float32)
 
         shape = (1, *input_dim)
         self.axis = tuple(range(1, len(input_dim)))
@@ -327,15 +326,15 @@ class LayerNorm:
         dx = dx_norm * self.std_inv + dvar * TWO * self.x_mu / m + dmean / m
 
         if self.trainable:
-            optimizer.step(self.gamma, dgamma, self.learning_rate, self.regularization)
-            optimizer.step(self.beta, dbeta, self.learning_rate, self.regularization, True)
+            optimizer.step(self.gamma, dgamma, self.learn_params)
+            optimizer.step(self.beta, dbeta, self.learn_params, is_bias=True)
 
         return dx
 
     def export(self):
         return {"eps": self.eps.copy(), "gamma": self.gamma.copy(), "beta": self.beta.copy(),
-                "layer": LayerNorm, "lr": self.learning_rate.copy(), "trainable": self.trainable,
-                "regularization": {key: value.get() for key, value in self.regularization.items()}}
+                "layer": LayerNorm, "trainable": self.trainable,
+                "learn_params": {key: value.get() for key, value in self.learn_params.items()}}
 
 
 class Dropout:
@@ -440,39 +439,20 @@ def unpatchify(patches, input_shape, kH, kW, stride):
     return grad_input
 
 
-def _gap_backward(dpool, x, mode="Channel"):
-    B, H, W, C = x.shape
-    if mode == "Channel":
-        reshape = (B, 1, 1, C)
-        norm = (H * W)
-    else:
-        reshape = (B, H, W, 1)
-        norm = C
-    # равномерно распределяем градиент
-    dx = cp.zeros_like(x, dtype=cp.float32)
-    dx += dpool.reshape(*reshape) / norm
-    return dx
+class XavierUniform:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def __call__(self, fan_in, fan_out, *args, **kwargs):
+        return xavier_uniform(fan_in, fan_out)
 
 
-def _gmp_backward(dpool, x, mode="Channel"):
-    B, H, W, C = x.shape
-    if mode == "Channel":
-        # ищем индексы максимумов
-        flat_idx = x.reshape(B, H * W, C).argmax(axis=1)  # (B, C), индексы вдоль H*W
-        dx = cp.zeros_like(x.reshape(B, H * W, C), dtype=cp.float32)
+class KaimingUniform:
+    def __init__(self, alpha=0.0, *args, **kwargs):
+        self.alpha = 0.0
 
-        # раскладываем dpool в эти индексы
-        b_idx = cp.arange(B)[:, None]
-        c_idx = cp.arange(C)[None, :]
-        dx[b_idx, flat_idx, c_idx] = dpool  # "разбрасываем" сразу по батчу и каналам
-        return dx.reshape(B, H, W, C)
-    else:
-        flat_idx = x.argmax(axis=-1)  # (B,H,W), индекс канала
-        dx = cp.zeros_like(x, dtype=cp.float32)
-
-        b_idx, h_idx, w_idx = cp.indices((B, H, W))
-        dx[b_idx, h_idx, w_idx, flat_idx] = dpool.reshape(B, H, W)
-        return dx
+    def __call__(self, fan_in, fan_out, *args, **kwargs):
+        return kaiming_uniform(fan_in, fan_out, self.alpha)
 
 
 def xavier_uniform(fan_in, fan_out, *args, **kwargs):
@@ -481,8 +461,8 @@ def xavier_uniform(fan_in, fan_out, *args, **kwargs):
 
 
 def kaiming_uniform(fan_in, fan_out, alpha=0.0, *args, **kwargs):
-    bound = cp.sqrt(6 / ((1 + alpha ** 2) * fan_in))
-    return cp.random.uniform(-bound, bound, size=(fan_in, fan_out), dtype=cp.float32)
+    limit = cp.sqrt(6 / ((1 + alpha ** 2) * fan_in))
+    return cp.random.uniform(-limit, limit, size=(fan_in, fan_out), dtype=cp.float32)
 
 
 def restore_axes(x, aggregated_axes):

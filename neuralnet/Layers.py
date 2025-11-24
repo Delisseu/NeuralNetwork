@@ -2,7 +2,7 @@ import cupy as cp
 import numpy as np
 
 from neuralnet.Features import Sigmoid, Softmax, Relu
-from neuralnet.Layers_Features import Padding, PatchExtractor, xavier_uniform, kaiming_uniform, Aggregation
+from neuralnet.Layers_Features import Padding, PatchExtractor, Aggregation, KaimingUniform, XavierUniform
 
 
 class Layer:
@@ -20,16 +20,18 @@ class Layer:
 
 
 class Conv2D(Layer):
-    def __init__(self, out_channels, input_dim, kernel_size=(3, 3), init_func=kaiming_uniform, alpha=0.0,
-                 trainable=True, learn_params=None, prev=None, w=None, bias=None, input_need_shape=None, **kwargs):
+    def __init__(self, out_channels, input_dim, kernel_size=(3, 3), init_dict=None, trainable=True,
+                 learn_params=None, prev=None, w=None, bias=None, input_need_shape=None, **kwargs):
+
+        if not isinstance(init_dict, dict):
+            self.init_dict = {"init_cls": KaimingUniform}
+        self.init_cls = self.init_dict["init_cls"](**self.init_dict)
 
         if isinstance(learn_params, dict):
             self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
         else:
             self.learn_params = {"lr": cp.asarray(0.001, dtype=cp.float32)}
 
-        self.alpha = cp.asarray(alpha, dtype=cp.float32)
-        self.init_func = init_func
         self.out_channels = out_channels
         self.kernel_size = kernel_size
         self.padding = Padding(kernel_size=kernel_size, **kwargs)
@@ -96,7 +98,7 @@ class Conv2D(Layer):
         if self.W is None:
             kH, kW = self.kernel_size
             fan_in = self.input_need_shape[-1] * kH * kW
-            self.W = self.init_func(fan_in, self.out_channels, alpha=self.alpha)
+            self.W = self.init_cls(fan_in, self.out_channels)
             self.W = self.W.T
 
         if self.bias is None:
@@ -110,7 +112,8 @@ class Conv2D(Layer):
     def export(self):
         dicti = {"out_channels": self.out_channels, "trainable": self.trainable, "kernel_size": self.kernel_size,
                  "input_dim": self.input_dim, "input_need_shape": self.input_need_shape, "layer": Conv2D,
-                 "learn_params": {key: value.get() for key, value in self.learn_params.items()}, "w": self.W.copy()}
+                 "learn_params": {key: value.get() for key, value in self.learn_params.items()}, "w": self.W.copy(),
+                 "init_dict": self.init_dict}
 
         if self.bias is not False:
             dicti["bias"] = self.bias.copy()
@@ -124,8 +127,12 @@ class Conv2D(Layer):
 
 class Dense(Layer):
 
-    def __init__(self, neurons, input_dim, learn_params=None, init_func=kaiming_uniform, trainable=True, alpha=0.0,
+    def __init__(self, neurons, input_dim, learn_params=None, init_dict=None, trainable=True, alpha=0.0,
                  w=None, bias=None, prev=None, input_need_shape=None, **kwargs):
+
+        if not isinstance(init_dict, dict):
+            self.init_dict = {"init_cls": KaimingUniform}
+        self.init_cls = self.init_dict["init_cls"](**self.init_dict)
 
         if isinstance(learn_params, dict):
             self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
@@ -134,7 +141,6 @@ class Dense(Layer):
 
         self.alpha = cp.asarray(alpha, dtype=cp.float32)
         self.input = None
-        self.init_func = init_func
         self.next = None
         self.prev = prev
         self.input_dim = input_dim
@@ -184,7 +190,7 @@ class Dense(Layer):
     def init_weights(self):
         fan_in = self.input_need_shape[0]
         if self.W is None:
-            self.W = self.init_func(fan_in, self.count_neurons, alpha=self.alpha)
+            self.W = self.init_cls(fan_in, self.count_neurons)
 
         if self.bias is None:
             self.bias = cp.zeros((1, self.count_neurons))
@@ -194,7 +200,7 @@ class Dense(Layer):
         self.W = cp.array(self.W, dtype=cp.float32)
 
     def export(self):
-        dicti = {"neurons": self.count_neurons, "trainable": self.trainable, "alpha": self.alpha.copy(),
+        dicti = {"neurons": self.count_neurons, "trainable": self.trainable, "init_dict": self.init_dict,
                  "input_need_shape": self.input_need_shape, "layer": Dense, "input_dim": self.input_dim,
                  "learn_params": {key: value.get() for key, value in self.learn_params.items()}, "w": self.W.copy()}
 
@@ -261,7 +267,11 @@ class MultiHead(Layer):
 
 class MultiAttentionWO(Layer):
     def __init__(self, input_dim, d_need_head, learn_params=None, trainable=True, w=None, prev=None,
-                 input_need_shape=None, bias=False, **kwargs):
+                 input_need_shape=None, bias=False, init_dict=None, **kwargs):
+
+        if not isinstance(init_dict, dict):
+            self.init_dict = {"init_cls": XavierUniform}
+        self.init_cls = self.init_dict["init_cls"](**self.init_dict)
 
         if isinstance(learn_params, dict):
             self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
@@ -328,7 +338,7 @@ class MultiAttentionWO(Layer):
         d_model = self.input_need_shape[-1]
 
         if self.W is None:
-            self.W = xavier_uniform(d_model, self.d_need_head)
+            self.W = self.init_cls(d_model, self.d_need_head)
 
         if self.bias is None:
             self.bias = cp.zeros((1, self.d_need_head))
@@ -338,7 +348,7 @@ class MultiAttentionWO(Layer):
 
     def export(self):
         dicti = {"trainable": self.trainable, "w": self.W.copy(), "d_need_head": self.d_need_head,
-                 "layer": MultiAttentionWO, "input_dim": self.input_dim,
+                 "layer": MultiAttentionWO, "input_dim": self.input_dim, "init_dict": self.init_dict,
                  "learn_params": {key: value.get() for key, value in self.learn_params.items()}}
 
         if self.bias is not False:
@@ -351,7 +361,11 @@ class MultiAttentionWO(Layer):
 
 class SelfAttention(Layer):
     def __init__(self, input_dim, learn_params=None, d_need_head=None, trainable=True, Wq=None, Wk=None,
-                 Wv=None, prev=None, input_need_shape=None, **kwargs):
+                 Wv=None, prev=None, input_need_shape=None, init_dict=None, **kwargs):
+
+        if not isinstance(init_dict, dict):
+            self.init_dict = {"init_cls": XavierUniform}
+        self.init_cls = self.init_dict["init_cls"](**self.init_dict)
 
         if isinstance(learn_params, dict):
             self.learn_params = {key: cp.asarray(value, dtype=cp.float32) for key, value in learn_params.items()}
@@ -451,11 +465,11 @@ class SelfAttention(Layer):
         d_model = self.input_need_shape[-1]
 
         if self.Wq is None:
-            self.Wq = xavier_uniform(d_model, self.d_need_head)
+            self.Wq = self.init_cls(d_model, self.d_need_head)
         if self.Wk is None:
-            self.Wk = xavier_uniform(d_model, self.d_need_head)
+            self.Wk = self.init_cls(d_model, self.d_need_head)
         if self.Wv is None:
-            self.Wv = xavier_uniform(d_model, self.d_need_head)
+            self.Wv = self.init_cls(d_model, self.d_need_head)
 
         self.Wq = cp.asarray(self.Wq, dtype=cp.float32)
         self.Wk = cp.asarray(self.Wk, dtype=cp.float32)
@@ -464,7 +478,8 @@ class SelfAttention(Layer):
     def export(self):
         dicti = {"trainable": self.trainable, "input_need_shape": self.input_need_shape, "layer": SelfAttention,
                  "Wq": self.Wq.copy(), "Wv": self.Wv.copy(), "Wk": self.Wk.copy(), "input_dim": self.input_dim,
-                 "learn_params": {key: value.get() for key, value in self.learn_params.items()}}
+                 "learn_params": {key: value.get() for key, value in self.learn_params.items()},
+                 "init_dict": self.init_dict}
 
         return dicti
 
@@ -502,10 +517,10 @@ class ConvAttention(Layer):
                      "trainable": trainable},
                     {"layer": Relu},
                     {"layer": Dense, "neurons": input_dim[-1], "learn_params": learn_params,
-                     "init_func": xavier_uniform, "trainable": trainable}]
+                     "init_dict": {XavierUniform}, "trainable": trainable}]
             else:  # Spatial
                 inner = [{"input_dim": (*input_dim[:-1], channels), "kernel_size": kernel_size, "out_channels": 1,
-                          "layer": Conv2D, "learn_params": learn_params, "init_func": xavier_uniform,
+                          "layer": Conv2D, "learn_params": learn_params, "init_dict": {XavierUniform},
                           "trainable": trainable}]
 
         self.inner = nn_class(inner, optimizer=optimizer, loss_func=None)
@@ -622,7 +637,7 @@ class MultiConvAttentionWO(Layer):
         if mode == "Channel":
             if inner is None:
                 inner = [{"layer": MultiAttentionWO, "d_need_head": d_need_head, "learn_params": learn_params,
-                          "trainable": trainable, "input_need_shape": input_need_shape, "init_func": xavier_uniform},
+                          "trainable": trainable, "input_need_shape": input_need_shape, "init_dict": {XavierUniform}},
                          {"layer": Sigmoid}]
             self.agg_axis = (1, 2)
         else:
@@ -633,7 +648,7 @@ class MultiConvAttentionWO(Layer):
 
             if inner is None:
                 inner = [{"layer": Conv2D, "out_channels": d_need_head, "learn_params": learn_params,
-                          "trainable": trainable, "input_need_shape": input_need_shape, "init_func": xavier_uniform,
+                          "trainable": trainable, "input_need_shape": input_need_shape, "init_dict": {XavierUniform},
                           "kernel_size": kernel_size},
                          {"layer": Sigmoid}]
             self.agg_axis = (3,)
