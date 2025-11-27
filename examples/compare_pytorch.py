@@ -58,21 +58,19 @@ def check_vram():
 def train_torch(torch_loader):
     losses_torch = []
     for epoch in range(10):
+        total_samples = 0
+        loss_sum = 0
         for xb, yb in torch_loader:
             xb, yb = xb.cuda(), yb.cuda()
             optimizer.zero_grad()
             out = torch_model(xb)
             loss = criterion(out, yb)
+            loss_sum += loss.cpu().detach().numpy()*xb.shape[0]
+            total_samples += xb.shape[0]
             loss.backward()
             optimizer.step()
 
-        torch_model.eval()
-        with torch.no_grad():
-            # predict на всех данных
-            all_out = torch_model(torch.from_numpy(x_train.reshape(-1, 1, 28, 28)).cuda())
-            full_loss = criterion(all_out, torch.from_numpy(y_train).cuda())
-            losses_torch.append(full_loss.item())
-        torch_model.train()
+        losses_torch.append(loss_sum/total_samples)
     return losses_torch
 
 
@@ -81,13 +79,13 @@ torch_model = TorchCNN().cuda()
 x_train = (np.load("images.npy") / 255).astype(np.float32)
 y_train = np.load("labels.npy")
 # мой DataLoader
-train_loader = AsyncCupyDataLoader(x_train, y_train, batch_size=1000)
+train_loader = AsyncCupyDataLoader(x_train, y_train, batch_size=1024)
 
 # pytorch DataLoader
 torch_loader = DataLoader(TensorDataset(
     torch.from_numpy(x_train.reshape(-1, 1, 28, 28)),
     torch.from_numpy(y_train)
-), batch_size=1000, shuffle=True)
+), batch_size=1024, shuffle=True)
 
 # ---------- NeuralNetwork (моя реализация) ----------
 w1 = torch_model.conv1.weight.detach().cpu().numpy()
@@ -118,13 +116,12 @@ model = NeuralNetwork(configs, loss_func=CCELogits(), optimizer=Adam())
 used_mem = check_vram()
 
 t0 = time.perf_counter()
-model.train(train_loader, epochs=10, early_stop=10, x_test=x_train, y_test=y_train, logs=True)
+model.train(train_loader, epochs=10, logs=True)
 t_mine = time.perf_counter() - t0
 
 used_mem_net = check_vram()
 
-losses_mine = model.losses
-losses_mine = [loss.get() for loss in losses_mine]
+losses_mine = model.losses["train"]
 print(f"Использовано Cupy NN vram: {used_mem_net - used_mem:.2f} GB")
 # ---------- PyTorch ----------
 
@@ -172,3 +169,5 @@ t_backward_torch = time.perf_counter() - t1
 print(
     f"Forward+Backward (1 sample) - CuPy NN forward & backward: {t_forward_mine:.5f}s,  {t_backward_mine:.5f}s |"
     f" PyTorch: {t_forward_torch:.5f}s,  {t_backward_torch:.5f}s")
+
+

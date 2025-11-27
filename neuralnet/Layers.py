@@ -19,6 +19,13 @@ class Layer:
         pass
 
 
+class MetaLayer(Layer):
+    """
+    Маркерный класс для слоёв, которые содержат вложенные подмодули.
+    """
+    pass
+
+
 class Conv2D(Layer):
     def __init__(self, out_channels, input_dim, kernel_size=(3, 3), init_dict=None, trainable=True,
                  learn_params=None, prev=None, w=None, bias=None, input_need_shape=None, **kwargs):
@@ -132,6 +139,9 @@ class Dense(Layer):
 
         if not isinstance(init_dict, dict):
             self.init_dict = {"init_cls": KaimingUniform}
+        else:
+            self.init_dict = init_dict
+
         self.init_cls = self.init_dict["init_cls"](**self.init_dict)
 
         if isinstance(learn_params, dict):
@@ -212,7 +222,7 @@ class Dense(Layer):
         return dicti
 
 
-class MultiHead(Layer):
+class MultiHead(MetaLayer):
     def __init__(self, input_dim, heads, nn_class, optimizer, prev, concat_axis=False, **kwargs):
         init_heads = []
 
@@ -484,7 +494,7 @@ class SelfAttention(Layer):
         return dicti
 
 
-class ConvAttention(Layer):
+class ConvAttention(MetaLayer):
     def __init__(self, input_dim, nn_class, optimizer, prev=None, input_need_shape=None, reduction=2, inner=None,
                  agg_mode="GAP+GMP", learn_params=None, forward_weight=False, mode="Channel", kernel_size=(7, 7),
                  trainable=True, **kwargs):
@@ -622,7 +632,7 @@ class ConvAttention(Layer):
         return dicti
 
 
-class MultiConvAttentionWO(Layer):
+class MultiConvAttentionWO(MetaLayer):
     def __init__(self, input_dim, nn_class, optimizer, d_need_head, learn_params=None, trainable=True, prev=None,
                  input_need_shape=None, kernel_size=(1, 1), mode="Channel", inner=None, **kwargs):
 
