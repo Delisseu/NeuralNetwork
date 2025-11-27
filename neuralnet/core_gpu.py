@@ -1,6 +1,6 @@
-from neuralnet.Loaders import AsyncCupyDataLoader
 from neuralnet.Features import *
-from neuralnet.Layers import Dense, Conv2D, MultiHead, ConvAttention, MultiConvAttentionWO
+from neuralnet.Layers import Dense, Conv2D, MultiHead, ConvAttention, MultiConvAttentionWO, MetaLayer
+from neuralnet.Loaders import AsyncCupyDataLoader
 from neuralnet.Optimizers import SGD
 
 
@@ -22,7 +22,7 @@ class NeuralNetwork:
         self.loss_func = loss_func
         self.optimizer = optimizer
         self.stream_load = cp.cuda.Stream(non_blocking=True)
-        self.losses = []
+        self.losses = {"train": [], "test": []}
 
         prev_layer = None
         first_config = layer_configs[0]
@@ -41,7 +41,7 @@ class NeuralNetwork:
                         raise ValueError(
                             "Если после Dense следует Conv2d, то Conv2d нужно передать нужную форму тензора")
 
-            if layer_cls in [MultiHead, ConvAttention, MultiConvAttentionWO]:
+            if issubclass(layer_cls, MetaLayer):
                 config["nn_class"] = NeuralNetwork
                 config["optimizer"] = self.optimizer
 
@@ -63,7 +63,7 @@ class NeuralNetwork:
             self.layer_list.append(layer)
             prev_layer = layer
 
-    def train(self, train_loader, epochs=30, early_stop=0, x_test=None, y_test=None, min_delta=1e-3,
+    def train(self, train_loader, epochs=30, early_stop=0, test_loader=None, min_delta=1e-3,
               logs=True, early_target="loss_func"):
         """
         Обучение модели.
@@ -73,8 +73,7 @@ class NeuralNetwork:
             epochs (int, optional): число эпох обучения.
             early_stop (int, optional): количество эпох без улучшения,
                 после которых обучение останавливается. Если 0 — отключено.
-            x_test (np.ndarray, optional): валидационные данные X для ранней остановки.
-            y_test (np.ndarray | list, optional): валидационные метки.
+            test_loader (iterable): генератор тестовых батчей (x, y).
             min_delta (float, optional): минимальное улучшение метрики для сброса patience.
             logs (bool, optional): печатать ли прогресс по эпохам.
             early_target (str | callable | list, optional):
@@ -86,20 +85,11 @@ class NeuralNetwork:
             иначе None.
         """
 
-        if early_stop and (x_test is None or y_test is None):
-            raise ValueError("Для ранней остановки нужны x_test и y_test")
+        if early_stop and (test_loader is None):
+            raise ValueError("Для ранней остановки нужен test_loader")
 
         if early_target == "loss_func":
             early_target = self.loss_func
-
-        if x_test is not None:
-
-            x_test = AsyncCupyDataLoader(np.asarray(x_test, dtype=cp.float32), batch_size=train_loader.batch_size,
-                                         shuffle=False, stream=train_loader.stream)
-            if isinstance(early_target, list):
-                y_test = [cp.asarray(arr, dtype=cp.float32) for arr in y_test]
-            else:
-                y_test = cp.asarray(y_test, dtype=cp.float32)
 
         best_loss = float('inf')
         min_delta = cp.asarray(min_delta, dtype=cp.float32)
@@ -109,32 +99,58 @@ class NeuralNetwork:
         val_loss = best_loss
 
         for epoch in range(1, epochs + 1):
+            losses = []
+            total_samples = 0
             for bx, by in train_loader:
+
                 y_hat = self.forward(bx, train=True)
 
+                total_samples += bx.shape[0]
+
                 if isinstance(self.loss_func, list):
-                    loss_grad = []
+                    loss_grads = []
+                    head_loss = []
                     for i, loss_func in enumerate(self.loss_func):
-                        loss = loss_func.grad(y_hat[i], by[i])
-                        loss_grad.append(loss)
+                        loss_grad = loss_func.grad(y_hat[i], by[i])
+                        loss_grads.append(loss_grad)
+                        if logs:
+                            head_loss.append(loss_func(y_hat[i], by[i]) * cp.asarray(by[i].shape[0], cp.float32))
+
+                    if logs:
+                        losses.append(head_loss)
                 else:
-                    loss_grad = self.loss_func.grad(y_hat, by)
-                self.backward(loss_grad)
+                    loss_grads = self.loss_func.grad(y_hat, by)
+                    if logs:
+                        losses.append(self.loss_func(y_hat, by) * cp.asarray(by.shape[0], cp.float32))
+
+                self.backward(loss_grads)
+
             # Early stopping — после всей эпохи
             if early_stop:
-                y_val_pred = self.predict(x_test, numpy=False)
+                total_test_samples = 0
+                test_losses = []
+                for tbx, tby in test_loader:
+                    y_val_pred = self.forward(tbx, train=False)
 
-                # поддержка single, list
-                if isinstance(early_target, list):
-                    val_losses = []
-                    for i, loss_func in enumerate(early_target):
-                        val_losses.append(loss_func(y_val_pred[i], y_test[i]))
-                    val_loss = sum(val_losses)
-                else:
-                    val_loss = early_target(y_val_pred, y_test)
+                    total_test_samples += tbx.shape[0]
 
-                del y_val_pred
-                self.losses.append(val_loss)
+                    # поддержка single, list
+                    if isinstance(early_target, list):
+                        head_test_loss = []
+                        for i, loss_func in enumerate(early_target):
+                            test_loss = loss_func(y_val_pred[i], tby[i])
+                            if logs:
+                                head_test_loss.append(test_loss * cp.asarray(tby[i].shape[0], cp.float32))
+
+                        if logs:
+                            test_losses.append(head_test_loss)
+                    else:
+                        test_loss = early_target(y_val_pred, tby)
+                        if logs:
+                            test_losses.append(test_loss * cp.asarray(tby.shape[0], cp.float32))
+
+                test_epoch_loss = cp.asarray(test_losses).sum(axis=0).get() / total_test_samples
+                val_loss = test_epoch_loss.mean()  # Усредняем, чтобы можно было сравнить с другими эпохами
 
                 if cp.isnan(val_loss):
                     print(f"Model unstable at epoch {epoch}. Best val loss: {best_loss:.6f} at epoch {best_epoch}")
@@ -153,7 +169,11 @@ class NeuralNetwork:
                     return best_model
 
             if logs:
-                print(f"Epoch: {epoch}, Metric: {val_loss:.6f}, Best_val_metric: {best_loss:.6f}")
+                if early_stop:
+                    self.losses["test"].append(test_epoch_loss)
+                self.losses["train"].append((cp.asarray(losses).sum(axis=0).get() / total_samples))
+                print(f"Epoch: {epoch}, Loss: {self.losses["train"][-1].mean():.6f}, Test_Metric: {val_loss:.6f},"
+                      f" Best_test_metric: {best_loss:.6f}")
 
         return best_model
 
@@ -180,18 +200,21 @@ class NeuralNetwork:
             y_hat = self.forward(xb, train=False)
             if isinstance(self.loss_func, list):
                 for i, z in enumerate(y_hat):
+                    if numpy:
+                        z = z.get()
                     predictions[i].append(z)
             else:
+                if numpy:
+                    y_hat = y_hat.get()
                 predictions.append(y_hat)
 
         if isinstance(self.loss_func, list):
             predictions = [
-                cp.concatenate(p, axis=0).get() if numpy else cp.concatenate(p, axis=0)
+                np.concatenate(p, axis=0) if numpy else cp.concatenate(p, axis=0)
                 for p in predictions
             ]
         else:
-            predictions = cp.concatenate(predictions, axis=0)
-            predictions = predictions.get() if numpy else predictions
+            predictions = np.concatenate(predictions, axis=0) if numpy else cp.concatenate(predictions, axis=0)
         return predictions
 
     def forward(self, x, train=False):
