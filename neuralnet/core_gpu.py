@@ -1,5 +1,5 @@
 from neuralnet.Features import *
-from neuralnet.Layers import Dense, Conv2D, MultiHead, ConvAttention, MultiConvAttentionWO, MetaLayer
+from neuralnet.Layers import Dense, Conv2D, MetaLayer
 from neuralnet.Loaders import AsyncCupyDataLoader
 from neuralnet.Optimizers import SGD
 

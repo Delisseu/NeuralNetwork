@@ -32,6 +32,9 @@ class Conv2D(Layer):
 
         if not isinstance(init_dict, dict):
             self.init_dict = {"init_cls": KaimingUniform}
+        else:
+            self.init_dict = init_dict
+
         self.init_cls = self.init_dict["init_cls"](**self.init_dict)
 
         if isinstance(learn_params, dict):
@@ -281,6 +284,9 @@ class MultiAttentionWO(Layer):
 
         if not isinstance(init_dict, dict):
             self.init_dict = {"init_cls": XavierUniform}
+        else:
+            self.init_dict = init_dict
+
         self.init_cls = self.init_dict["init_cls"](**self.init_dict)
 
         if isinstance(learn_params, dict):
@@ -375,6 +381,8 @@ class SelfAttention(Layer):
 
         if not isinstance(init_dict, dict):
             self.init_dict = {"init_cls": XavierUniform}
+        else:
+            self.init_dict = init_dict
         self.init_cls = self.init_dict["init_cls"](**self.init_dict)
 
         if isinstance(learn_params, dict):
