@@ -86,7 +86,8 @@
 6. Schedulers: InverseSqrtScheduler, InverseSqrtSchedulerMod1, InverseSqrtSchedulerMod2.
 7. Инициализации: Xavier_uniform, Kaiming_uniform.
 8. Загрузчики: DataLoader, AsyncCupyDataLoader.
-9. Другие возможности: Pooling, PatchExtractor, Padding, Dropout, Aggregation.
+9. Регуляризации: l1, l2, elastic, weight_decay.
+10. Другие возможности: Pooling, PatchExtractor, Padding, Dropout, Aggregation.
 
 ---
 
