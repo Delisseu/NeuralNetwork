@@ -139,18 +139,18 @@ class NeuralNetwork:
                         head_test_loss = []
                         for i, loss_func in enumerate(early_target):
                             test_loss = loss_func(y_val_pred[i], tby[i])
-                            if logs:
-                                head_test_loss.append(test_loss * cp.asarray(tby[i].shape[0], cp.float32))
+                            head_test_loss.append(test_loss * cp.asarray(tby[i].shape[0], cp.float32))
 
-                        if logs:
-                            test_losses.append(head_test_loss)
+                        test_losses.append(head_test_loss)
                     else:
                         test_loss = early_target(y_val_pred, tby)
-                        if logs:
-                            test_losses.append(test_loss * cp.asarray(tby.shape[0], cp.float32))
+                        test_losses.append(test_loss * cp.asarray(tby.shape[0], cp.float32))
 
                 test_epoch_loss = cp.asarray(test_losses).sum(axis=0).get() / total_test_samples
                 val_loss = test_epoch_loss.mean()  # Усредняем, чтобы можно было сравнить с другими эпохами
+
+                self.losses["test"].append(test_epoch_loss)
+                self.losses["train"].append((cp.asarray(losses).sum(axis=0).get() / total_samples))
 
                 if np.isnan(val_loss):
                     print(f"Model unstable at epoch {epoch}. Best val loss: {best_loss:.6f} at epoch {best_epoch}")
@@ -169,9 +169,6 @@ class NeuralNetwork:
                     return best_model
 
             if logs:
-                if early_stop:
-                    self.losses["test"].append(test_epoch_loss)
-                self.losses["train"].append((cp.asarray(losses).sum(axis=0).get() / total_samples))
                 print(f"Epoch: {epoch}, Loss: {self.losses["train"][-1].mean():.6f}, Test_Metric: {val_loss:.6f},"
                       f" Best_test_metric: {best_loss:.6f}")
 
